@@ -29,44 +29,24 @@ app.post('/api/process-payment', async (req, res) => {
     const paymentClient = new Payment(client);
 
     const body = {
-      transaction_amount: Number(formData.transaction_amount),
-      description: `Compra Azter — ${cartItems.map(i => i.title).join(', ')}`,
-      payment_method_id: formData.payment_method_id,
-      payer: {
-        email: buyer.email,
-        first_name: buyer.nombre,
-        last_name: buyer.apellido,
-        phone: { area_code: '', number: String(buyer.telefono) },
-        identification: formData.payer?.identification,
-      },
-      additional_info: {
-        items: cartItems.map(item => ({
-          id: String(item.id),
-          title: `${item.title} - ${item.color?.name || ''} - Talle ${item.size}`,
-          quantity: item.quantity,
-          unit_price: item.price,
-          currency_id: 'ARS',
-        })),
-        shipments: {
-          receiver_address: {
-            street_name: address || '',
-            comment: notes || '',
+        transaction_amount: Number(formData.transaction_amount),
+        token: formData.token,
+        description: 'Compra Azter',
+        installments: Number(formData.installments) || 1,
+        payment_method_id: formData.payment_method_id,
+        payer: {
+          email: formData.payer?.email || buyer.email,
+          identification: {
+            type: formData.payer?.identification?.type || 'DNI',
+            number: formData.payer?.identification?.number || '12345678',
           },
         },
-        payer: {
-          first_name: buyer.nombre,
-          last_name: buyer.apellido,
-          phone: { area_code: '', number: String(buyer.telefono) },
-        },
-      },
-    };
+      };
 
     // Pagos con tarjeta requieren token e installments
-    if (formData.token) {
-      body.token = formData.token;
-      body.installments = Number(formData.installments) || 1;
-      if (formData.issuer_id) body.issuer_id = formData.issuer_id;
-    }
+    if (formData.issuer_id) {
+        body.issuer_id = formData.issuer_id;
+      }
 
     const result = await paymentClient.create({
       body,
