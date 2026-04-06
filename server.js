@@ -55,7 +55,7 @@ app.post('/api/process-payment', async (req, res) => {
 
     console.log(`Pago ${result.id} — ${result.status} (${result.status_detail})`);
 
-    if (result.status === 'approved') {
+    if (result.status === 'approved' || result.status === 'pending') {
       const addr = {
         display:      address || '',
         calle:        addressComponents?.road ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}` : '',
@@ -65,8 +65,10 @@ app.post('/api/process-payment', async (req, res) => {
         notes:        notes || '',
       };
 
-      sendOrderEmails({ buyer, addr, cartItems, total: result.transaction_amount, orderId: result.id })
-        .catch(err => console.error('Error enviando emails:', err.message));
+      if (result.status === 'approved') {
+        sendOrderEmails({ buyer, addr, cartItems, total: result.transaction_amount, orderId: result.id })
+          .catch(err => console.error('Error enviando emails:', err.message));
+      }
 
       const saveOrder = async () => {
         const { data: order, error: orderError } = await supabase
