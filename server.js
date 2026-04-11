@@ -28,23 +28,10 @@ app.post('/api/process-payment', async (req, res) => {
   try {
     const paymentClient = new Payment(client);
 
-    // ✅ Construir array de items con TODOS los campos requeridos por MP
-    const items = cartItems.map((item, idx) => ({
-      id: item.id || `ITEM_${idx + 1}`,
-      title: item.title || 'Producto',
-      description: item.subtitle || item.description || 'Producto de Azter',
-      category_id: 'ecommerce',
-      quantity: item.quantity || 1,
-      unit_price: Number(item.price) || 0,
-    }));
-
     const body = {
       transaction_amount: Number(formData.transaction_amount),
       description: `Compra Azter — ${cartItems.map(i => i.title).join(', ')}`,
       payment_method_id: formData.payment_method_id,
-      // ✅ ITEMS COMPLETOS (recomendado - 6 campos)
-      items: items,
-      // ✅ PAYER COMPLETO (obligatorio + recomendado)
       payer: {
         email: buyer.email, // OBLIGATORIO
         first_name: buyer.nombre, // RECOMENDADO
