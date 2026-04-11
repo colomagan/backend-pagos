@@ -19,7 +19,7 @@ app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
 app.post('/api/process-payment', async (req, res) => {
-  const { formData, buyer, address, addressComponents, notes, cartItems } = req.body;
+  const { formData, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra } = req.body;
 
   if (!formData || !buyer || !cartItems) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
@@ -29,99 +29,117 @@ app.post('/api/process-payment', async (req, res) => {
     const paymentClient = new Payment(client);
 
     const body = {
-        transaction_amount: Number(formData.transaction_amount),
-        token: formData.token,
-        description: 'Compra Azter',
-        installments: Number(formData.installments) || 1,
-        payment_method_id: formData.payment_method_id,
-        payer: {
-          email: formData.payer?.email || buyer.email,
-          identification: {
-            type: formData.payer?.identification?.type || 'DNI',
-            number: formData.payer?.identification?.number || '12345678',
-          },
+      transaction_amount: Number(formData.transaction_amount),
+      description: `Compra Azter — ${cartItems.map(i => i.title).join(', ')}`,
+      payment_method_id: formData.payment_method_id,
+      payer: {
+        email: buyer.email,
+        first_name: buyer.nombre,
+        last_name: buyer.apellido,
+        identification: {
+          type: formData.payer?.identification?.type || 'DNI',
+          number: String(formData.payer?.identification?.number || '12345678'),
         },
-      };
+      },
+    };
 
-    // Pagos con tarjeta requieren token e installments
+    if (formData.token) {
+      body.token = formData.token;
+      body.installments = Number(formData.installments) || 1;
+    }
+
     if (formData.issuer_id) {
-        body.issuer_id = formData.issuer_id;
-      }
+      body.issuer_id = String(formData.issuer_id);
+    }
+
+    console.log('📤 Body enviado a MP:', JSON.stringify(body, null, 2));
 
     const result = await paymentClient.create({
       body,
       requestOptions: { idempotencyKey: `${buyer.email}-${Date.now()}` },
     });
 
-    console.log(`Pago ${result.id} — ${result.status} (${result.status_detail})`);
+    console.log(`✅ Pago ${result.id} — ${result.status} (${result.status_detail})`);
 
-    if (result.status === 'approved' || result.status === 'pending') {
-      const addr = {
-        display:      address || '',
-        calle:        addressComponents?.road ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}` : '',
-        barrio:       addressComponents?.suburb || addressComponents?.neighbourhood || addressComponents?.city_district || '',
-        ciudad:       addressComponents?.city || addressComponents?.town || addressComponents?.village || '',
-        codigoPostal: addressComponents?.postcode || '',
-        notes:        notes || '',
-      };
+    const addr = {
+      display:      address || '',
+      calle:        addressComponents?.road ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}` : '',
+      barrio:       addressComponents?.suburb || addressComponents?.neighbourhood || '',
+      ciudad:       addressComponents?.city || '',
+      codigoPostal: addressComponents?.postcode || '',
+      notes:        notes || '',
+      tipo:         addressType || '',
+      piso:         piso || '',
+      letra:        letra || '',
+    };
 
-      if (result.status === 'approved') {
-        sendOrderEmails({ buyer, addr, cartItems, total: result.transaction_amount, orderId: result.id })
-          .catch(err => console.error('Error enviando emails:', err.message));
-      }
+    // Enviar email al dueño siempre — aprobado, pendiente o rechazado
+    sendOrderEmails({
+      buyer,
+      addr,
+      cartItems,
+      total:        result.transaction_amount,
+      orderId:      result.id,
+      status:       result.status,
+      statusDetail: result.status_detail,
+    }).catch(err => console.error('Error enviando emails:', err.message));
 
-      const saveOrder = async () => {
-        const { data: order, error: orderError } = await supabase
-          .from('orders')
-          .insert({
-            mp_payment_id:   result.id,
-            status:          result.status,
-            status_detail:   result.status_detail,
-            total:           Math.round(result.transaction_amount),
-            buyer_name:      buyer.nombre,
-            buyer_lastname:  buyer.apellido,
-            buyer_email:     buyer.email,
-            buyer_phone:     String(buyer.telefono),
-            address_display: address || '',
-            address_street:  addr.calle,
-            address_barrio:  addr.barrio,
-            address_city:    addr.ciudad,
-            address_postcode:addr.codigoPostal,
-            address_notes:   notes || '',
-          })
-          .select('id')
-          .single();
+    // Guardar en DB siempre
+    const saveOrder = async () => {
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .insert({
+          mp_payment_id:    result.id,
+          status:           result.status,
+          status_detail:    result.status_detail,
+          total:            Math.round(result.transaction_amount),
+          buyer_name:       buyer.nombre,
+          buyer_lastname:   buyer.apellido,
+          buyer_email:      buyer.email,
+          buyer_phone:      String(buyer.telefono),
+          address_display:  address || '',
+          address_street:   addr.calle,
+          address_barrio:   addr.barrio,
+          address_city:     addr.ciudad,
+          address_postcode: addr.codigoPostal,
+          address_notes:    notes || '',
+          address_type:     addressType || null,
+          address_piso:     piso || null,
+          address_letra:    letra || null,
+        })
+        .select('id')
+        .single();
 
-        if (orderError) throw orderError;
+      if (orderError) throw orderError;
 
-        const items = cartItems.map(item => ({
-          order_id:    order.id,
-          product_id:  item.id,
-          title:       item.title,
-          subtitle:    item.subtitle || null,
-          color_name:  item.color?.name || null,
-          color_value: item.color?.value || null,
-          size:        item.size || null,
-          quantity:    item.quantity,
-          unit_price:  item.price,
-        }));
+      const items = cartItems.map(item => ({
+        order_id:    order.id,
+        product_id:  item.id,
+        title:       item.title,
+        subtitle:    item.subtitle || null,
+        color_name:  item.color?.name || null,
+        color_value: item.color?.value || null,
+        size:        item.size || null,
+        quantity:    item.quantity,
+        unit_price:  item.price,
+      }));
 
-        const { error: itemsError } = await supabase.from('order_items').insert(items);
-        if (itemsError) throw itemsError;
+      const { error: itemsError } = await supabase.from('order_items').insert(items);
+      if (itemsError) throw itemsError;
 
-        console.log(`Orden #${order.id} guardada en DB (MP: ${result.id})`);
-      };
+      console.log(`💾 Orden #${order.id} guardada [${result.status}]`);
+    };
 
-      saveOrder().catch(err => console.error('Error guardando orden en DB:', err.message));
-    }
+    saveOrder().catch(err => console.error('Error guardando orden:', err.message));
 
     res.json({
       status: result.status,
-      id: result.id,
+      id:     result.id,
       detail: result.status_detail,
     });
+
   } catch (err) {
-    console.error('Error MP:', err?.cause ?? err.message);
+    console.error('❌ Error MP:', err?.cause ?? err.message);
     res.status(500).json({ error: true, message: 'Error al procesar el pago. Intentá de nuevo.' });
   }
 });
@@ -156,5 +174,5 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
-  console.log(`Servidor Azter escuchando en http://localhost:${PORT}`);
+  console.log(`✅ Servidor Azter escuchando en http://localhost:${PORT}`);
 });

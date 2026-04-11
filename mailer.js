@@ -2,9 +2,8 @@ const nodemailer = require('nodemailer');
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.hostinger.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: false,
-  requireTLS: true,
+  port: parseInt(process.env.EMAIL_PORT) || 465,
+  secure: true,
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -13,6 +12,38 @@ const transporter = nodemailer.createTransport({
 
 const formatPrice = (n) =>
   Number(n).toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 });
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function statusDetailLabel(detail) {
+  const map = {
+    cc_rejected_insufficient_amount:       'Fondos insuficientes',
+    cc_rejected_bad_filled_security_code:  'Código de seguridad incorrecto',
+    cc_rejected_bad_filled_date:           'Fecha de vencimiento incorrecta',
+    cc_rejected_card_disabled:             'Tarjeta bloqueada',
+    cc_rejected_call_for_authorize:        'Requiere autorización del banco',
+    cc_rejected_high_risk:                 'Rechazada por riesgo',
+    cc_rejected_blacklist:                 'Tarjeta no permitida',
+    cc_rejected_other_reason:              'Error general de tarjeta',
+    cc_rejected_bad_filled_other:          'Datos de tarjeta incorrectos',
+    cc_rejected_max_attempts:             'Máximo de intentos alcanzado',
+    cc_rejected_duplicated_payment:        'Pago duplicado',
+    pending_waiting_payment:              'Esperando pago',
+    pending_review_manual:                'En revisión manual',
+    pending_contingency:                  'Pendiente por contingencia',
+  };
+  return map[detail] || detail || 'Sin detalle';
+}
+
+function statusBadgeOwner(status, statusDetail) {
+  if (status === 'approved') {
+    return `<span style="display:inline-block;background:#dcfce7;color:#16a34a;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">✓ &nbsp;Pago aprobado</span>`;
+  }
+  if (status === 'pending') {
+    return `<span style="display:inline-block;background:#fef9c3;color:#92400e;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">⏳ &nbsp;Pago pendiente — ${statusDetailLabel(statusDetail)}</span>`;
+  }
+  return `<span style="display:inline-block;background:#fee2e2;color:#dc2626;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">✗ &nbsp;Pago rechazado — ${statusDetailLabel(statusDetail)}</span>`;
+}
 
 function itemsRows(cartItems, siteUrl) {
   return cartItems.map(item => {
@@ -65,7 +96,11 @@ function addressBlock(addr) {
     </tr>`).join('');
 }
 
-function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
+// ── Email dueño — universal (todos los estados) ───────────────────────────────
+
+function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, siteUrl }) {
+  const isApproved = status === 'approved';
+  const subjectLabel = isApproved ? 'Nueva venta recibida' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra — pago rechazado';
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -73,38 +108,49 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
   <tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+      <!-- Header -->
       <tr>
         <td style="background:#111;padding:36px 40px;text-align:center;">
           <p style="margin:0 0 6px;font-size:28px;font-weight:900;color:#fff;letter-spacing:6px;">AZTER</p>
-          <p style="margin:0;font-size:11px;color:#888;letter-spacing:3px;text-transform:uppercase;">Nueva venta recibida</p>
+          <p style="margin:0;font-size:11px;color:#888;letter-spacing:3px;text-transform:uppercase;">${subjectLabel}</p>
         </td>
       </tr>
+
+      <!-- Badge de estado -->
       <tr>
         <td style="padding:28px 40px 0;text-align:center;">
-          <span style="display:inline-block;background:#dcfce7;color:#16a34a;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">
-            ✓ &nbsp;Pago aprobado — Orden #${orderId}
-          </span>
+          ${statusBadgeOwner(status, statusDetail)}
+          ${orderId ? `<p style="margin:10px 0 0;font-size:12px;color:#aaa;letter-spacing:0.1em;">Orden #${orderId}</p>` : ''}
         </td>
       </tr>
+
+      <!-- Productos -->
       <tr>
         <td style="padding:28px 40px 0;">
-          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Artículos vendidos</p>
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Artículos</p>
           <table width="100%" cellpadding="0" cellspacing="0">
             ${itemsRows(cartItems, siteUrl)}
           </table>
         </td>
       </tr>
+
+      <!-- Total -->
       <tr>
         <td style="padding:16px 40px 28px;">
           <table width="100%" cellpadding="0" cellspacing="0">
             <tr>
-              <td style="padding:14px 0;border-top:2px solid #111;font-size:15px;font-weight:700;color:#111;">Total cobrado</td>
+              <td style="padding:14px 0;border-top:2px solid #111;font-size:15px;font-weight:700;color:#111;">Total</td>
               <td style="padding:14px 0;border-top:2px solid #111;font-size:18px;font-weight:900;color:#111;text-align:right;">${formatPrice(total)}</td>
             </tr>
           </table>
         </td>
       </tr>
+
+      <!-- Divisor -->
       <tr><td style="height:1px;background:#f0f0f0;"></td></tr>
+
+      <!-- Comprador -->
       <tr>
         <td style="padding:28px 40px 0;">
           <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Datos del comprador</p>
@@ -115,15 +161,21 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
             </tr>
             <tr>
               <td style="padding:6px 0;font-size:12px;color:#888;">Email</td>
-              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${buyer.email}</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">
+                <a href="mailto:${buyer.email}" style="color:#111;">${buyer.email}</a>
+              </td>
             </tr>
             <tr>
               <td style="padding:6px 0;font-size:12px;color:#888;">Teléfono</td>
-              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${buyer.telefono}</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">
+                <a href="tel:${buyer.telefono}" style="color:#111;">${buyer.telefono}</a>
+              </td>
             </tr>
           </table>
         </td>
       </tr>
+
+      <!-- Envío -->
       <tr>
         <td style="padding:24px 40px 36px;">
           <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Dirección de envío</p>
@@ -132,11 +184,14 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
           </table>
         </td>
       </tr>
+
+      <!-- Footer -->
       <tr>
         <td style="background:#f9f9f9;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
           <p style="margin:0;font-size:11px;color:#bbb;letter-spacing:0.05em;">AZTER — Panel de ventas &nbsp;·&nbsp; ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
         </td>
       </tr>
+
     </table>
   </td></tr>
 </table>
@@ -144,7 +199,9 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
 </html>`;
 }
 
-function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
+// ── Email comprador — aprobado (para uso futuro) ──────────────────────────────
+
+function buyerApprovedEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
   return `<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
@@ -152,23 +209,26 @@ function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
   <tr><td align="center">
     <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
       <tr>
         <td style="background:#111;padding:40px;text-align:center;">
           <p style="margin:0 0 10px;font-size:28px;font-weight:900;color:#fff;letter-spacing:6px;">AZTER</p>
           <p style="margin:0;font-size:22px;font-weight:700;color:#fff;">¡Gracias por tu compra!</p>
         </td>
       </tr>
+
       <tr>
         <td style="padding:36px 40px 0;text-align:center;">
           <p style="margin:0 0 8px;font-size:15px;color:#333;line-height:1.6;">
             Hola <strong>${buyer.nombre}</strong>, tu pedido fue confirmado con éxito.<br>
-            Pronto nos pondremos en contacto con vos para coordinar el envío.
+            Pronto nos pondremos en contacto para coordinar el envío.
           </p>
           <p style="margin:16px 0 0;display:inline-block;background:#111;color:#fff;padding:10px 24px;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:0.15em;">
             ORDEN #${orderId}
           </p>
         </td>
       </tr>
+
       <tr>
         <td style="padding:32px 40px 0;">
           <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Tu pedido</p>
@@ -177,17 +237,10 @@ function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
           </table>
         </td>
       </tr>
+
       <tr>
         <td style="padding:16px 40px 0;">
           <table width="100%" cellpadding="0" cellspacing="0">
-            <tr>
-              <td style="padding:8px 0;font-size:13px;color:#555;">Subtotal</td>
-              <td style="padding:8px 0;font-size:13px;color:#555;text-align:right;">${formatPrice(total)}</td>
-            </tr>
-            <tr>
-              <td style="padding:8px 0;font-size:13px;color:#16a34a;font-weight:600;">Envío</td>
-              <td style="padding:8px 0;font-size:13px;color:#16a34a;font-weight:600;text-align:right;">Gratis</td>
-            </tr>
             <tr>
               <td style="padding:12px 0;border-top:2px solid #111;font-size:15px;font-weight:700;color:#111;">Total</td>
               <td style="padding:12px 0;border-top:2px solid #111;font-size:18px;font-weight:900;color:#111;text-align:right;">${formatPrice(total)}</td>
@@ -195,7 +248,9 @@ function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
           </table>
         </td>
       </tr>
+
       <tr><td style="height:1px;background:#f0f0f0;margin-top:28px;"></td></tr>
+
       <tr>
         <td style="padding:28px 40px;">
           <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Dirección de envío</p>
@@ -204,38 +259,37 @@ function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
           </table>
         </td>
       </tr>
+
       <tr>
         <td style="padding:0 40px 36px;">
           <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9f9f9;border-radius:8px;">
             <tr>
               <td style="padding:20px 24px;">
                 <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#111;">¿Qué sigue?</p>
-                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">
-                  📦 &nbsp;Vamos a preparar tu pedido y coordinar la entrega.
-                </p>
-                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">
-                  📱 &nbsp;Te contactaremos al <strong>${buyer.telefono}</strong> o a <strong>${buyer.email}</strong> para darte los detalles del envío.
-                </p>
-                <p style="margin:0;font-size:13px;color:#555;line-height:1.6;">
-                  ❓ &nbsp;¿Tenés alguna duda? Respondé este email y te ayudamos.
-                </p>
+                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">📦 &nbsp;Vamos a preparar tu pedido y coordinar la entrega.</p>
+                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">📱 &nbsp;Te contactaremos al <strong>${buyer.telefono}</strong> o a <strong>${buyer.email}</strong>.</p>
+                <p style="margin:0;font-size:13px;color:#555;line-height:1.6;">❓ &nbsp;¿Tenés alguna duda? Respondé este email y te ayudamos.</p>
               </td>
             </tr>
           </table>
         </td>
       </tr>
+
       <tr>
         <td style="background:#111;padding:24px 40px;text-align:center;">
           <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#fff;letter-spacing:4px;">AZTER</p>
           <p style="margin:0;font-size:11px;color:#666;">© ${new Date().getFullYear()} Azter. Todos los derechos reservados.</p>
         </td>
       </tr>
+
     </table>
   </td></tr>
 </table>
 </body>
 </html>`;
 }
+
+// ── Emails de contacto y newsletter ──────────────────────────────────────────
 
 function contactEmailHTML({ name, email, subject, message }) {
   return `<!DOCTYPE html>
@@ -284,57 +338,6 @@ function contactEmailHTML({ name, email, subject, message }) {
 </html>`;
 }
 
-function contactConfirmationEmailHTML({ name, subject }) {
-  return `<!DOCTYPE html>
-<html lang="es">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
-  <tr><td align="center">
-    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
-      <tr>
-        <td style="background:#111;padding:40px;text-align:center;">
-          <p style="margin:0 0 10px;font-size:28px;font-weight:900;color:#fff;letter-spacing:6px;">AZTER</p>
-          <p style="margin:0;font-size:18px;font-weight:700;color:#fff;">Recibimos tu mensaje</p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:36px 40px;text-align:center;">
-          <p style="margin:0 0 16px;font-size:15px;color:#333;line-height:1.7;">
-            Hola <strong>${name}</strong>, recibimos tu consulta sobre <strong>${subject}</strong>.<br>
-            Te respondemos a la brevedad.
-          </p>
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:0 40px 36px;">
-          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9f9f9;border-radius:8px;">
-            <tr>
-              <td style="padding:20px 24px;">
-                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">
-                  📬 &nbsp;Tu mensaje fue recibido correctamente.
-                </p>
-                <p style="margin:0;font-size:13px;color:#555;line-height:1.6;">
-                  ❓ &nbsp;Si tenés alguna urgencia, respondé este email y te ayudamos.
-                </p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-      <tr>
-        <td style="background:#111;padding:24px 40px;text-align:center;">
-          <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#fff;letter-spacing:4px;">AZTER</p>
-          <p style="margin:0;font-size:11px;color:#666;">© ${new Date().getFullYear()} Azter. Todos los derechos reservados.</p>
-        </td>
-      </tr>
-    </table>
-  </td></tr>
-</table>
-</body>
-</html>`;
-}
-
 function newsletterEmailHTML({ email }) {
   return `<!DOCTYPE html>
 <html lang="es">
@@ -367,22 +370,16 @@ function newsletterEmailHTML({ email }) {
 </html>`;
 }
 
+// ── Envío de emails de contacto y newsletter ──────────────────────────────────
+
 async function sendContactEmail({ name, email, subject, message }) {
-  await Promise.all([
-    transporter.sendMail({
-      from: `"Azter Contacto" <${process.env.EMAIL_USER}>`,
-      to: process.env.STORE_EMAIL,
-      replyTo: email,
-      subject: `📩 Contacto: ${subject}`,
-      html: contactEmailHTML({ name, email, subject, message }),
-    }),
-    transporter.sendMail({
-      from: `"Azter" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: `Recibimos tu mensaje — Azter`,
-      html: contactConfirmationEmailHTML({ name, subject }),
-    }),
-  ]);
+  await transporter.sendMail({
+    from: `"Azter Contacto" <${process.env.EMAIL_USER}>`,
+    to: process.env.STORE_EMAIL,
+    replyTo: email,
+    subject: `📩 Contacto: ${subject}`,
+    html: contactEmailHTML({ name, email, subject, message }),
+  });
 }
 
 async function sendNewsletterEmail({ email }) {
@@ -394,29 +391,24 @@ async function sendNewsletterEmail({ email }) {
   });
 }
 
-async function sendOrderEmails({ buyer, addr, cartItems, total, orderId }) {
+// ── Función principal — envía siempre, para todos los estados ─────────────────
+
+async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status, statusDetail }) {
   const siteUrl = process.env.SITE_URL || '';
 
+  const subjectEmojis = { approved: '🛍️', pending: '⏳', rejected: '⚠️' };
+  const emoji = subjectEmojis[status] || '📋';
+
+  // Email al dueño — siempre, con todos los datos recolectados
   const ownerMail = {
     from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
     to: process.env.STORE_EMAIL,
-    subject: `🛍️ Nueva venta — Orden #${orderId} — ${formatPrice(total)}`,
-    html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }),
+    subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
+    html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, siteUrl }),
   };
 
-  const buyerMail = {
-    from: `"Azter" <${process.env.EMAIL_USER}>`,
-    to: buyer.email,
-    subject: `¡Tu pedido está confirmado! — Azter`,
-    html: buyerEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }),
-  };
-
-  await Promise.all([
-    transporter.sendMail(ownerMail),
-    transporter.sendMail(buyerMail),
-  ]);
-
-  console.log(`Emails enviados — Orden #${orderId}`);
+  await transporter.sendMail(ownerMail);
+  console.log(`📧 Email al dueño enviado [${status}] — ${buyer.email}`);
 }
 
 module.exports = { sendOrderEmails, sendContactEmail, sendNewsletterEmail };
