@@ -28,19 +28,47 @@ app.post('/api/process-payment', async (req, res) => {
   try {
     const paymentClient = new Payment(client);
 
+    // ✅ Construir array de items con TODOS los campos requeridos por MP
+    const items = cartItems.map((item, idx) => ({
+      id: item.id || `ITEM_${idx + 1}`,
+      title: item.title || 'Producto',
+      description: item.subtitle || item.description || 'Producto de Azter',
+      category_id: 'ecommerce',
+      quantity: item.quantity || 1,
+      unit_price: Number(item.price) || 0,
+    }));
+
     const body = {
       transaction_amount: Number(formData.transaction_amount),
       description: `Compra Azter — ${cartItems.map(i => i.title).join(', ')}`,
       payment_method_id: formData.payment_method_id,
+      // ✅ ITEMS COMPLETOS (recomendado - 6 campos)
+      items: items,
+      // ✅ PAYER COMPLETO (obligatorio + recomendado)
       payer: {
-        email: buyer.email,
-        first_name: buyer.nombre,
-        last_name: buyer.apellido,
+        email: buyer.email, // OBLIGATORIO
+        first_name: buyer.nombre, // RECOMENDADO
+        last_name: buyer.apellido, // RECOMENDADO
+        phone: {
+          area_code: buyer.telefono?.substring(0, 2) || '54',
+          number: buyer.telefono?.replace(/\D/g, '').substring(2) || '0',
+        }, // RECOMENDADO
         identification: {
           type: formData.payer?.identification?.type || 'DNI',
           number: String(formData.payer?.identification?.number || '12345678'),
         },
+        address: {
+          zip_code: addressComponents?.postcode || '',
+          street_name: addressComponents?.road || address?.split(',')[0] || '',
+          street_number: addressComponents?.house_number || '',
+        },
       },
+      // ✅ STATEMENT DESCRIPTOR (recomendado)
+      statement_descriptor: 'AZTER ECOMMERCE',
+      // ✅ EXTERNAL REFERENCE (obligatorio)
+      external_reference: `ORDER_${Date.now()}_${buyer.email}`,
+      // ✅ NOTIFICATION URL (obligatorio)
+      notification_url: `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/webhook-mercadopago`,
     };
 
     if (formData.token) {
@@ -173,6 +201,53 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
+// ✅ WEBHOOK DE MERCADO PAGO (OBLIGATORIO)
+// Recibe notificaciones de cambios de estado en pagos
+app.post('/api/webhook-mercadopago', async (req, res) => {
+  try {
+    const { type, data } = req.body;
+
+    // MP envía notificaciones de tipo "payment" cuando hay cambios en un pago
+    if (type === 'payment') {
+      const paymentId = data?.id;
+      if (!paymentId) {
+        console.log('⚠️ Webhook sin payment ID, ignorando...');
+        return res.json({ ok: true }); // Responder 200 a MP igual para que no reintente
+      }
+
+      console.log(`🔔 Webhook recibido: Payment ${paymentId}`);
+
+      // Aquí puedes:
+      // 1. Consultar el estado actual del pago en MP
+      // 2. Actualizar el estado en tu base de datos
+      // 3. Enviar emails al cliente
+      // 4. Activar flujos automatizados
+
+      // Ejemplo: actualizar orden en Supabase
+      const { data: paymentData, error: fetchError } = await supabase
+        .from('orders')
+        .select('id')
+        .eq('mp_payment_id', paymentId.toString())
+        .single();
+
+      if (fetchError) {
+        console.log(`⚠️ Orden no encontrada para payment ${paymentId}`);
+        return res.json({ ok: true });
+      }
+
+      console.log(`✅ Webhook procesado para orden #${paymentData.id}`);
+    }
+
+    // Responder 200 a MP para que no reintente
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('❌ Error en webhook:', err.message);
+    // Responder 200 igual para que MP no reintente infinitamente
+    res.json({ ok: true });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Servidor Azter escuchando en http://localhost:${PORT}`);
+  console.log(`📍 Webhook disponible en: /api/webhook-mercadopago`);
 });
