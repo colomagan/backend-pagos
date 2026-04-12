@@ -61,7 +61,7 @@ app.post('/api/process-payment', async (req, res) => {
     if (formData.token) {
       body.token = formData.token;
       body.installments = Number(formData.installments) || 1;
-    }
+    } 
 
     if (formData.issuer_id) {
       body.issuer_id = String(formData.issuer_id);
