@@ -135,8 +135,12 @@ app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 app.post('/api/payway-session', async (req, res) => {
   const { amount, buyer } = req.body;
+  const parsedAmount = Number(amount);
 
-  if (!amount || !buyer?.email) {
+  if (!parsedAmount || parsedAmount <= 0 || !Number.isFinite(parsedAmount)) {
+    return res.status(400).json({ error: true, message: 'Monto inválido' });
+  }
+  if (!buyer?.email) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
   }
 
@@ -154,7 +158,7 @@ app.post('/api/payway-session', async (req, res) => {
       },
       body: JSON.stringify({
         site_id: process.env.PAYWAY_SITE_ID,
-        amount: Number(amount),
+        amount: parsedAmount,
         currency: 'ARS',
         email: buyer.email,
       }),
@@ -167,7 +171,7 @@ app.post('/api/payway-session', async (req, res) => {
     }
 
     const data = await response.json();
-    console.log('🔑 PayWay session creada:', data.session_token || data.token || JSON.stringify(data));
+    console.log('🔑 PayWay session creada OK');
 
     res.json({ sessionToken: data.session_token || data.token });
   } catch (err) {
