@@ -190,6 +190,11 @@ app.post('/api/payway-verify', async (req, res) => {
     return res.status(400).json({ error: true, message: 'Datos inválidos' });
   }
 
+  const parsedAmount = Math.round(Number(amount));
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ error: true, message: 'Monto inválido' });
+  }
+
   const isProd = process.env.NODE_ENV === 'production';
   const baseUrl = isProd
     ? 'https://payway.com.ar'
@@ -226,11 +231,6 @@ app.post('/api/payway-verify', async (req, res) => {
       piso:         piso || '',
       letra:        letra || '',
     };
-
-    const parsedAmount = Math.round(Number(amount));
-    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
-      return res.status(400).json({ error: true, message: 'Monto inválido' });
-    }
 
     // Save order in Supabase
     const saveOrder = async () => {
