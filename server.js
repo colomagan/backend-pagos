@@ -144,31 +144,42 @@ app.post('/api/payway-session', async (req, res) => {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
   }
 
+  // URLs CORRECTAS
   const isPaywayProd = process.env.PAYWAY_ENV === 'production';
   const baseUrl = isPaywayProd
-    ? 'https://payway.com.ar'
-    : 'https://sandbox.decidir.com';
+    ? 'https://live.decidir.com/api/v2'
+    : 'https://sandbox.decidir.com/api/v2';
 
   try {
-    const response = await fetch(`${baseUrl}/api/session`, {
+    const response = await fetch(`${baseUrl}/checkout`, { // Se agrega /checkout
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.PAYWAY_PRIVATE_KEY}`,
+        'apikey': process.env.PAYWAY_PRIVATE_KEY, // Se cambia Authorization por apikey
       },
       body: JSON.stringify({
         site_id: process.env.PAYWAY_SITE_ID,
         amount: parsedAmount,
         currency: 'ARS',
         email: buyer.email,
+        template_id: process.env.PAYWAY_TEMPLATE_ID // VITAL: Asegúrate de tener esto en Render
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
       console.error('❌ PayWay session error:', errText);
-      return res.status(502).json({ error: true, message: 'Error al crear sesión de pago.' });
+      return res.status(502).json({ error: true, message: 'Error al crear sesión.' });
     }
+
+    const data = await response.json();
+    console.log('🔑 PayWay session creada OK');
+    res.json({ sessionToken: data.id }); // En la API de Decidir suele ser 'id'
+  } catch (err) {
+    console.error('❌ Error payway-session:', err.message);
+    res.status(500).json({ error: true, message: 'Error de conexión con PayWay.' });
+  }
+});
 
     const data = await response.json();
     console.log('🔑 PayWay session creada OK');
