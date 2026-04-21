@@ -1,14 +1,14 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const { MercadoPagoConfig, Payment } = require('mercadopago');
+const multer = require('multer');
 const { sendOrderEmails, sendContactEmail, sendNewsletterEmail } = require('./mailer');
 const { supabase } = require('./supabase');
 
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+
 const app = express();
 const PORT = process.env.PORT || 3001;
-
-const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 
 const allowedOrigins = [
   'http://localhost:5173',
@@ -18,144 +18,89 @@ const allowedOrigins = [
 app.use(cors({ origin: allowedOrigins }));
 app.use(express.json());
 
-app.post('/api/process-payment', async (req, res) => {
-  const { formData, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra } = req.body;
+app.post('/api/process-transfer', upload.single('voucher'), async (req, res) => {
+  const { buyer, address, addressComponents, notes, cartItems, addressType, piso, letra, total } = req.body;
 
-  if (!formData || !buyer || !cartItems) {
+  if (!req.file || !buyer || !cartItems) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
   }
 
   try {
-    const paymentClient = new Payment(client);
+    const buyerObj       = JSON.parse(buyer);
+    const addrCompsObj   = JSON.parse(addressComponents || '{}');
+    const cartItemsArr   = JSON.parse(cartItems);
+    const totalNum       = Number(total);
 
-    const body = {
-      transaction_amount: Number(formData.transaction_amount),
-      description: `Compra Azter — ${cartItems.map(i => i.title).join(', ')}`,
-      payment_method_id: formData.payment_method_id,
-      payer: {
-        email: buyer.email, // OBLIGATORIO
-        first_name: buyer.nombre, // RECOMENDADO
-        last_name: buyer.apellido, // RECOMENDADO
-        phone: {
-          area_code: buyer.telefono?.substring(0, 2) || '54',
-          number: buyer.telefono?.replace(/\D/g, '').substring(2) || '0',
-        }, // RECOMENDADO
-        identification: {
-          type: formData.payer?.identification?.type || 'DNI',
-          number: String(formData.payer?.identification?.number || '12345678'),
-        },
-        address: {
-          zip_code: addressComponents?.postcode || '',
-          street_name: addressComponents?.road || address?.split(',')[0] || '',
-          street_number: addressComponents?.house_number || '',
-        },
-      },
-      // ✅ STATEMENT DESCRIPTOR (recomendado)
-      statement_descriptor: 'AZTER ECOMMERCE',
-      // ✅ EXTERNAL REFERENCE (obligatorio)
-      external_reference: `ORDER_${Date.now()}_${buyer.email}`,
-      // ✅ NOTIFICATION URL (obligatorio)
-      notification_url: `${process.env.BACKEND_URL || 'http://localhost:3001'}/api/webhook-mercadopago`,
-    };
+    // 1. Subir comprobante a Supabase Storage
+    const ext      = req.file.originalname.split('.').pop() || 'jpg';
+    const fileName = `voucher_${Date.now()}_${buyerObj.email.replace(/[^a-z0-9]/gi, '_')}.${ext}`;
 
-    if (formData.token) {
-      body.token = formData.token;
-      body.installments = Number(formData.installments) || 1;
-    } 
+    const { error: storageErr } = await supabase.storage
+      .from('vouchers')
+      .upload(fileName, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
 
-    if (formData.issuer_id) {
-      body.issuer_id = String(formData.issuer_id);
-    }
+    if (storageErr) throw storageErr;
 
-    console.log('📤 Body enviado a MP:', JSON.stringify(body, null, 2));
+    const { data: urlData } = supabase.storage.from('vouchers').getPublicUrl(fileName);
+    const voucherUrl = urlData?.publicUrl || null;
 
-    const result = await paymentClient.create({
-      body,
-      requestOptions: { idempotencyKey: `${buyer.email}-${Date.now()}` },
-    });
-
-    console.log(`✅ Pago ${result.id} — ${result.status} (${result.status_detail})`);
-
+    // 2. Guardar orden en DB
     const addr = {
       display:      address || '',
-      calle:        addressComponents?.road ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}` : '',
-      barrio:       addressComponents?.suburb || addressComponents?.neighbourhood || '',
-      ciudad:       addressComponents?.city || '',
-      codigoPostal: addressComponents?.postcode || '',
-      notes:        notes || '',
-      tipo:         addressType || '',
-      piso:         piso || '',
-      letra:        letra || '',
+      calle:        addrCompsObj?.road ? `${addrCompsObj.road}${addrCompsObj.house_number ? ' ' + addrCompsObj.house_number : ''}` : '',
+      barrio:       addrCompsObj?.suburb || addrCompsObj?.neighbourhood || '',
+      ciudad:       addrCompsObj?.city || '',
+      codigoPostal: addrCompsObj?.postcode || '',
     };
 
-    // Enviar email al dueño siempre — aprobado, pendiente o rechazado
-    sendOrderEmails({
-      buyer,
-      addr,
-      cartItems,
-      total:        result.transaction_amount,
-      orderId:      result.id,
-      status:       result.status,
-      statusDetail: result.status_detail,
-    }).catch(err => console.error('Error enviando emails:', err.message));
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        status:           'pending_transfer',
+        payment_method:   'transferencia',
+        voucher_url:      voucherUrl,
+        total:            Math.round(totalNum),
+        buyer_name:       buyerObj.nombre,
+        buyer_lastname:   buyerObj.apellido,
+        buyer_email:      buyerObj.email,
+        buyer_phone:      String(buyerObj.telefono),
+        address_display:  address || '',
+        address_street:   addr.calle,
+        address_barrio:   addr.barrio,
+        address_city:     addr.ciudad,
+        address_postcode: addr.codigoPostal,
+        address_notes:    notes || '',
+        address_type:     addressType || null,
+        address_piso:     piso || null,
+        address_letra:    letra || null,
+      })
+      .select('id')
+      .single();
 
-    // Guardar en DB siempre
-    const saveOrder = async () => {
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          mp_payment_id:    result.id,
-          status:           result.status,
-          status_detail:    result.status_detail,
-          total:            Math.round(result.transaction_amount),
-          buyer_name:       buyer.nombre,
-          buyer_lastname:   buyer.apellido,
-          buyer_email:      buyer.email,
-          buyer_phone:      String(buyer.telefono),
-          address_display:  address || '',
-          address_street:   addr.calle,
-          address_barrio:   addr.barrio,
-          address_city:     addr.ciudad,
-          address_postcode: addr.codigoPostal,
-          address_notes:    notes || '',
-          address_type:     addressType || null,
-          address_piso:     piso || null,
-          address_letra:    letra || null,
-        })
-        .select('id')
-        .single();
+    if (orderError) throw orderError;
 
-      if (orderError) throw orderError;
+    const items = cartItemsArr.map(item => ({
+      order_id:    order.id,
+      product_id:  item.id,
+      title:       item.title,
+      subtitle:    item.subtitle || null,
+      color_name:  item.color?.name || null,
+      color_value: item.color?.value || null,
+      size:        item.size || null,
+      quantity:    item.quantity,
+      unit_price:  item.price,
+    }));
 
-      const items = cartItems.map(item => ({
-        order_id:    order.id,
-        product_id:  item.id,
-        title:       item.title,
-        subtitle:    item.subtitle || null,
-        color_name:  item.color?.name || null,
-        color_value: item.color?.value || null,
-        size:        item.size || null,
-        quantity:    item.quantity,
-        unit_price:  item.price,
-      }));
+    const { error: itemsError } = await supabase.from('order_items').insert(items);
+    if (itemsError) throw itemsError;
 
-      const { error: itemsError } = await supabase.from('order_items').insert(items);
-      if (itemsError) throw itemsError;
+    console.log(`💸 Transferencia orden #${order.id} — comprobante subido`);
 
-      console.log(`💾 Orden #${order.id} guardada [${result.status}]`);
-    };
-
-    saveOrder().catch(err => console.error('Error guardando orden:', err.message));
-
-    res.json({
-      status: result.status,
-      id:     result.id,
-      detail: result.status_detail,
-    });
+    res.json({ ok: true, orderId: order.id });
 
   } catch (err) {
-    console.error('❌ Error MP:', err?.cause ?? err.message);
-    res.status(500).json({ error: true, message: 'Error al procesar el pago. Intentá de nuevo.' });
+    console.error('❌ Error process-transfer:', err.message);
+    res.status(500).json({ error: true, message: 'Error al procesar la transferencia.' });
   }
 });
 
@@ -188,53 +133,6 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
-// ✅ WEBHOOK DE MERCADO PAGO (OBLIGATORIO)
-// Recibe notificaciones de cambios de estado en pagos
-app.post('/api/webhook-mercadopago', async (req, res) => {
-  try {
-    const { type, data } = req.body;
-
-    // MP envía notificaciones de tipo "payment" cuando hay cambios en un pago
-    if (type === 'payment') {
-      const paymentId = data?.id;
-      if (!paymentId) {
-        console.log('⚠️ Webhook sin payment ID, ignorando...');
-        return res.json({ ok: true }); // Responder 200 a MP igual para que no reintente
-      }
-
-      console.log(`🔔 Webhook recibido: Payment ${paymentId}`);
-
-      // Aquí puedes:
-      // 1. Consultar el estado actual del pago en MP
-      // 2. Actualizar el estado en tu base de datos
-      // 3. Enviar emails al cliente
-      // 4. Activar flujos automatizados
-
-      // Ejemplo: actualizar orden en Supabase
-      const { data: paymentData, error: fetchError } = await supabase
-        .from('orders')
-        .select('id')
-        .eq('mp_payment_id', paymentId.toString())
-        .single();
-
-      if (fetchError) {
-        console.log(`⚠️ Orden no encontrada para payment ${paymentId}`);
-        return res.json({ ok: true });
-      }
-
-      console.log(`✅ Webhook procesado para orden #${paymentData.id}`);
-    }
-
-    // Responder 200 a MP para que no reintente
-    res.json({ ok: true });
-  } catch (err) {
-    console.error('❌ Error en webhook:', err.message);
-    // Responder 200 igual para que MP no reintente infinitamente
-    res.json({ ok: true });
-  }
-});
-
 app.listen(PORT, () => {
   console.log(`✅ Servidor Azter escuchando en http://localhost:${PORT}`);
-  console.log(`📍 Webhook disponible en: /api/webhook-mercadopago`);
 });
