@@ -133,6 +133,49 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
+app.post('/api/payway-session', async (req, res) => {
+  const { amount, buyer } = req.body;
+
+  if (!amount || !buyer?.email) {
+    return res.status(400).json({ error: true, message: 'Datos incompletos' });
+  }
+
+  const isProd = process.env.NODE_ENV === 'production';
+  const baseUrl = isProd
+    ? 'https://payway.com.ar'
+    : 'https://developers.payway.com.ar';
+
+  try {
+    const response = await fetch(`${baseUrl}/api/session`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.PAYWAY_PRIVATE_KEY}`,
+      },
+      body: JSON.stringify({
+        site_id: process.env.PAYWAY_SITE_ID,
+        amount: Number(amount),
+        currency: 'ARS',
+        email: buyer.email,
+      }),
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('❌ PayWay session error:', errText);
+      return res.status(502).json({ error: true, message: 'Error al crear sesión de pago.' });
+    }
+
+    const data = await response.json();
+    console.log('🔑 PayWay session creada:', data.session_token || data.token || JSON.stringify(data));
+
+    res.json({ sessionToken: data.session_token || data.token });
+  } catch (err) {
+    console.error('❌ Error payway-session:', err.message);
+    res.status(500).json({ error: true, message: 'Error de conexión con PayWay.' });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Servidor Azter escuchando en http://localhost:${PORT}`);
 });
