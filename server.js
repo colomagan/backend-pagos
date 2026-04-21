@@ -337,4 +337,7 @@ app.post('/api/webhook-payway', async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`✅ Servidor Azter escuchando en http://localhost:${PORT}`);
+  if (!process.env.PAYWAY_WEBHOOK_SECRET) {
+    console.warn('⚠️  PAYWAY_WEBHOOK_SECRET no configurado — el webhook de PayWay no está autenticado');
+  }
 });
