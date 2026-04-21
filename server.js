@@ -147,7 +147,7 @@ app.post('/api/payway-session', async (req, res) => {
   const isPaywayProd = process.env.PAYWAY_ENV === 'production';
   const baseUrl = isPaywayProd
     ? 'https://payway.com.ar'
-    : 'https://developers.payway.com.ar';
+    : 'https://sandbox.decidir.com';
 
   try {
     const response = await fetch(`${baseUrl}/api/session`, {
@@ -198,7 +198,7 @@ app.post('/api/payway-verify', async (req, res) => {
   const isPaywayProd = process.env.PAYWAY_ENV === 'production';
   const baseUrl = isPaywayProd
     ? 'https://payway.com.ar'
-    : 'https://developers.payway.com.ar';
+    : 'https://sandbox.decidir.com';
 
   try {
     let status = 'unknown';
