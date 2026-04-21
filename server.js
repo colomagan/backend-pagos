@@ -144,8 +144,8 @@ app.post('/api/payway-session', async (req, res) => {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
   }
 
-  const isProd = process.env.NODE_ENV === 'production';
-  const baseUrl = isProd
+  const isPaywayProd = process.env.PAYWAY_ENV === 'production';
+  const baseUrl = isPaywayProd
     ? 'https://payway.com.ar'
     : 'https://developers.payway.com.ar';
 
@@ -195,8 +195,8 @@ app.post('/api/payway-verify', async (req, res) => {
     return res.status(400).json({ error: true, message: 'Monto inválido' });
   }
 
-  const isProd = process.env.NODE_ENV === 'production';
-  const baseUrl = isProd
+  const isPaywayProd = process.env.PAYWAY_ENV === 'production';
+  const baseUrl = isPaywayProd
     ? 'https://payway.com.ar'
     : 'https://developers.payway.com.ar';
 
