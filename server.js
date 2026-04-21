@@ -186,6 +186,9 @@ app.post('/api/payway-verify', async (req, res) => {
   if (!paymentId || !buyer || !cartItems) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
   }
+  if (!Array.isArray(cartItems)) {
+    return res.status(400).json({ error: true, message: 'Datos inválidos' });
+  }
 
   const isProd = process.env.NODE_ENV === 'production';
   const baseUrl = isProd
@@ -206,8 +209,8 @@ app.post('/api/payway-verify', async (req, res) => {
       statusDetail = data.status_detail || data.reason || '';
       console.log(`✅ PayWay pago ${paymentId} — ${status}`);
     } else {
-      console.error(`⚠️ PayWay verify no-ok (${response.status}), usando status del callback`);
-      status = req.body.status || 'unknown';
+      console.error(`⚠️ PayWay verify no-ok (${response.status}), marcando como unverified`);
+      status = 'unverified';
     }
 
     const addr = {
@@ -225,20 +228,24 @@ app.post('/api/payway-verify', async (req, res) => {
     };
 
     const parsedAmount = Math.round(Number(amount));
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ error: true, message: 'Monto inválido' });
+    }
 
-    // Save order in Supabase (fire and forget)
+    // Save order in Supabase
     const saveOrder = async () => {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
           mp_payment_id:    paymentId.toString(),
+          payment_method:   'payway',
           status,
           status_detail:    statusDetail,
           total:            parsedAmount,
           buyer_name:       buyer.nombre,
           buyer_lastname:   buyer.apellido,
           buyer_email:      buyer.email,
-          buyer_phone:      String(buyer.telefono),
+          buyer_phone:      buyer.telefono ? String(buyer.telefono) : null,
           address_display:  address || '',
           address_street:   addr.calle,
           address_barrio:   addr.barrio,
@@ -270,16 +277,22 @@ app.post('/api/payway-verify', async (req, res) => {
       if (itemsError) throw itemsError;
 
       console.log(`💾 Orden PayWay guardada [${status}]`);
+      return order.id;
     };
 
-    saveOrder().catch(err => console.error('Error guardando orden:', err.message));
+    let internalOrderId = null;
+    try {
+      internalOrderId = await saveOrder();
+    } catch (err) {
+      console.error('Error guardando orden:', err.message);
+    }
 
     sendOrderEmails({
       buyer,
       addr,
       cartItems,
       total:        parsedAmount,
-      orderId:      paymentId,
+      orderId:      internalOrderId || paymentId,
       status,
       statusDetail,
     }).catch(err => console.error('Error enviando emails:', err.message));
@@ -293,15 +306,26 @@ app.post('/api/payway-verify', async (req, res) => {
 });
 
 app.post('/api/webhook-payway', async (req, res) => {
+  // Validate webhook secret if configured
+  const webhookSecret = process.env.PAYWAY_WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const receivedSecret = req.headers['x-payway-secret'] || req.headers['x-webhook-secret'];
+    if (receivedSecret !== webhookSecret) {
+      console.warn('⚠️ Webhook PayWay: secret inválido');
+      return res.status(401).json({ ok: false });
+    }
+  }
+
   try {
     const { payment_id, status } = req.body;
 
     if (payment_id && status) {
       console.log(`🔔 Webhook PayWay: Payment ${payment_id} → ${status}`);
-      await supabase
+      const { error: updateError } = await supabase
         .from('orders')
         .update({ status })
         .eq('mp_payment_id', payment_id.toString());
+      if (updateError) console.error('❌ Error actualizando orden en webhook:', updateError.message);
     }
 
     res.json({ ok: true });
