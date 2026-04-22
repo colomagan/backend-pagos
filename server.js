@@ -148,7 +148,7 @@ app.post('/api/payway-payment', async (req, res) => {
   const isProduction = process.env.PAYWAY_ENV === 'production';
   const baseUrl = isProduction
     ? 'https://live.decidir.com/api/v2'
-    : 'https://sandbox.decidir.com/api/v2';
+    : 'https://developers.decidir.com/api/v2';
 
   const siteTransactionId = `AZTER-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
