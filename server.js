@@ -153,29 +153,38 @@ app.post('/api/payway-payment', async (req, res) => {
   const siteTransactionId = `AZTER-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   try {
+    const decidirBody = {
+      site_transaction_id: siteTransactionId,
+      token,
+      payment_method_id: paymentMethodId || 1,
+      bin: bin || '',
+      amount: parsedAmount * 100,
+      currency: 'ARS',
+      installments: 1,
+      payment_type: 'single',
+      email: buyer.email,
+    };
+
+    console.log('📤 Decidir request:', JSON.stringify(decidirBody));
+
     const decidirRes = await fetch(`${baseUrl}/payment`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'apikey': process.env.PAYWAY_PRIVATE_KEY,
       },
-      body: JSON.stringify({
-        site_transaction_id: siteTransactionId,
-        token,
-        payment_method_id: paymentMethodId || 1,
-        bin: bin || '',
-        amount: parsedAmount * 100,
-        currency: 'ARS',
-        installments: 1,
-        payment_type: 'single',
-        email: buyer.email,
-      }),
+      body: JSON.stringify(decidirBody),
     });
 
-    const decidirData = await decidirRes.json();
+    const rawText = await decidirRes.text();
+    console.log(`📥 Decidir HTTP ${decidirRes.status}:`, rawText);
+
+    let decidirData = {};
+    try { decidirData = JSON.parse(rawText); } catch {}
+
     const status = decidirData.status || 'rejected';
     const statusDetail = decidirData.status_detail || '';
-    const decidirPaymentId = decidirData.id;
+    const decidirPaymentId = typeof decidirData.id === 'number' ? decidirData.id : null;
 
     console.log(`💳 Decidir ${decidirPaymentId} → ${status} (${statusDetail})`);
 
@@ -194,7 +203,7 @@ app.post('/api/payway-payment', async (req, res) => {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-          mp_payment_id:    decidirPaymentId ? decidirPaymentId.toString() : siteTransactionId,
+          mp_payment_id:    decidirPaymentId ?? null,
           payment_method:   'tarjeta',
           status,
           status_detail:    statusDetail,
