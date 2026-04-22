@@ -163,6 +163,7 @@ app.post('/api/payway-payment', async (req, res) => {
       installments: 1,
       payment_type: 'single',
       email: buyer.email,
+      sub_payments: [],
     };
 
     console.log('📤 Decidir request:', JSON.stringify(decidirBody));
@@ -199,7 +200,7 @@ app.post('/api/payway-payment', async (req, res) => {
     };
 
     let internalOrderId = null;
-    try {
+    if (status !== 'rejected') try {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
