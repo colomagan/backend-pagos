@@ -167,7 +167,7 @@ app.post('/api/payway-payment', async (req, res) => {
 
     console.log('📤 Decidir request:', JSON.stringify(decidirBody));
 
-    const decidirRes = await fetch(`${baseUrl}/payment`, {
+    const decidirRes = await fetch(`${baseUrl}/payments`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -203,7 +203,7 @@ app.post('/api/payway-payment', async (req, res) => {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-          mp_payment_id:    decidirPaymentId ?? null,
+          ...(decidirPaymentId ? { mp_payment_id: decidirPaymentId } : {}),
           payment_method:   'tarjeta',
           status,
           status_detail:    statusDetail,
