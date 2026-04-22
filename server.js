@@ -133,72 +133,11 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
-app.post('/api/payway-session', async (req, res) => {
-  const { amount, buyer } = req.body;
-  const parsedAmount = Number(amount);
+app.post('/api/payway-payment', async (req, res) => {
+  const { token, bin, paymentMethodId, amount, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra } = req.body;
 
-  if (!parsedAmount || parsedAmount <= 0 || !Number.isFinite(parsedAmount)) {
-    return res.status(400).json({ error: true, message: 'Monto inválido' });
-  }
-  if (!buyer?.email) {
+  if (!token || !amount || !buyer?.email || !Array.isArray(cartItems)) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
-  }
-
-  // URLs CORRECTAS
-  const isPaywayProd = process.env.PAYWAY_ENV === 'production';
-  const baseUrl = isPaywayProd
-    ? 'https://live.decidir.com/api/v2'
-    : 'https://sandbox.decidir.com/api/v2';
-
-  try {
-    const response = await fetch(`${baseUrl}/checkout`, { // Se agrega /checkout
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': process.env.PAYWAY_PRIVATE_KEY, // Se cambia Authorization por apikey
-      },
-      body: JSON.stringify({
-        site_id: process.env.PAYWAY_SITE_ID,
-        amount: parsedAmount,
-        currency: 'ARS',
-        email: buyer.email,
-        template_id: process.env.PAYWAY_TEMPLATE_ID // VITAL: Asegúrate de tener esto en Render
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error('❌ PayWay session error:', errText);
-      return res.status(502).json({ error: true, message: 'Error al crear sesión.' });
-    }
-
-    const data = await response.json();
-    console.log('🔑 PayWay session creada OK');
-    res.json({ sessionToken: data.id }); // En la API de Decidir suele ser 'id'
-  } catch (err) {
-    console.error('❌ Error payway-session:', err.message);
-    res.status(500).json({ error: true, message: 'Error de conexión con PayWay.' });
-  }
-});
-
-    const data = await response.json();
-    console.log('🔑 PayWay session creada OK');
-
-    res.json({ sessionToken: data.session_token || data.token });
-  } catch (err) {
-    console.error('❌ Error payway-session:', err.message);
-    res.status(500).json({ error: true, message: 'Error de conexión con PayWay.' });
-  }
-});
-
-app.post('/api/payway-verify', async (req, res) => {
-  const { paymentId, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra, amount } = req.body;
-
-  if (!paymentId || !buyer || !cartItems) {
-    return res.status(400).json({ error: true, message: 'Datos incompletos' });
-  }
-  if (!Array.isArray(cartItems)) {
-    return res.status(400).json({ error: true, message: 'Datos inválidos' });
   }
 
   const parsedAmount = Math.round(Number(amount));
@@ -206,28 +145,39 @@ app.post('/api/payway-verify', async (req, res) => {
     return res.status(400).json({ error: true, message: 'Monto inválido' });
   }
 
-  const isPaywayProd = process.env.PAYWAY_ENV === 'production';
-  const baseUrl = isPaywayProd
-    ? 'https://payway.com.ar'
-    : 'https://sandbox.decidir.com';
+  const isProduction = process.env.PAYWAY_ENV === 'production';
+  const baseUrl = isProduction
+    ? 'https://live.decidir.com/api/v2'
+    : 'https://sandbox.decidir.com/api/v2';
+
+  const siteTransactionId = `AZTER-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
   try {
-    let status = 'unknown';
-    let statusDetail = '';
-
-    const response = await fetch(`${baseUrl}/api/payment/${paymentId}`, {
-      headers: { 'Authorization': `Bearer ${process.env.PAYWAY_PRIVATE_KEY}` },
+    const decidirRes = await fetch(`${baseUrl}/payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': process.env.PAYWAY_PRIVATE_KEY,
+      },
+      body: JSON.stringify({
+        site_transaction_id: siteTransactionId,
+        token,
+        payment_method_id: paymentMethodId || 1,
+        bin: bin || '',
+        amount: parsedAmount * 100,
+        currency: 'ARS',
+        installments: 1,
+        payment_type: 'single',
+        email: buyer.email,
+      }),
     });
 
-    if (response.ok) {
-      const data = await response.json();
-      status = data.status || 'unknown';
-      statusDetail = data.status_detail || data.reason || '';
-      console.log(`✅ PayWay pago ${paymentId} — ${status}`);
-    } else {
-      console.error(`⚠️ PayWay verify no-ok (${response.status}), marcando como unverified`);
-      status = 'unverified';
-    }
+    const decidirData = await decidirRes.json();
+    const status = decidirData.status || 'rejected';
+    const statusDetail = decidirData.status_detail || '';
+    const decidirPaymentId = decidirData.id;
+
+    console.log(`💳 Decidir ${decidirPaymentId} → ${status} (${statusDetail})`);
 
     const addr = {
       display:      address || '',
@@ -237,19 +187,15 @@ app.post('/api/payway-verify', async (req, res) => {
       barrio:       addressComponents?.suburb || addressComponents?.neighbourhood || '',
       ciudad:       addressComponents?.city || '',
       codigoPostal: addressComponents?.postcode || '',
-      notes:        notes || '',
-      tipo:         addressType || '',
-      piso:         piso || '',
-      letra:        letra || '',
     };
 
-    // Save order in Supabase
-    const saveOrder = async () => {
+    let internalOrderId = null;
+    try {
       const { data: order, error: orderError } = await supabase
         .from('orders')
         .insert({
-          mp_payment_id:    paymentId.toString(),
-          payment_method:   'payway',
+          mp_payment_id:    decidirPaymentId ? decidirPaymentId.toString() : siteTransactionId,
+          payment_method:   'tarjeta',
           status,
           status_detail:    statusDetail,
           total:            parsedAmount,
@@ -287,32 +233,29 @@ app.post('/api/payway-verify', async (req, res) => {
       const { error: itemsError } = await supabase.from('order_items').insert(items);
       if (itemsError) throw itemsError;
 
-      console.log(`💾 Orden PayWay guardada [${status}]`);
-      return order.id;
-    };
-
-    let internalOrderId = null;
-    try {
-      internalOrderId = await saveOrder();
+      internalOrderId = order.id;
+      console.log(`💾 Orden #${internalOrderId} guardada [${status}]`);
     } catch (err) {
-      console.error('Error guardando orden:', err.message);
+      console.error('❌ Error guardando orden:', err.message);
     }
 
-    sendOrderEmails({
-      buyer,
-      addr,
-      cartItems,
-      total:        parsedAmount,
-      orderId:      internalOrderId || paymentId,
-      status,
-      statusDetail,
-    }).catch(err => console.error('Error enviando emails:', err.message));
+    if (status === 'approved' || status === 'pending' || status === 'in_process') {
+      sendOrderEmails({
+        buyer,
+        addr: { ...addr, notes: notes || '', tipo: addressType || '', piso: piso || '', letra: letra || '' },
+        cartItems,
+        total:        parsedAmount,
+        orderId:      internalOrderId || siteTransactionId,
+        status,
+        statusDetail,
+      }).catch(err => console.error('❌ Error enviando emails:', err.message));
+    }
 
-    res.json({ status, id: paymentId, detail: statusDetail });
+    res.json({ status, id: internalOrderId || decidirPaymentId, detail: statusDetail });
 
   } catch (err) {
-    console.error('❌ Error payway-verify:', err.message);
-    res.status(500).json({ error: true, message: 'Error al verificar el pago.' });
+    console.error('❌ Error payway-payment:', err.message);
+    res.status(500).json({ error: true, message: 'Error al procesar el pago.' });
   }
 });
 
