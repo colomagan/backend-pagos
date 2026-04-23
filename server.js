@@ -152,6 +152,36 @@ app.post('/api/payway-payment', async (req, res) => {
 
   const siteTransactionId = `AZTER-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+  /** CyberSource / Decidir: sin ^ ni :; máx ~255 */
+  const csText = (v, fallback = 'Producto') => {
+    const s = v != null && String(v).trim() ? String(v).trim() : fallback;
+    return s.replace(/[\^:]/g, ' ').slice(0, 255);
+  };
+
+  const retailItems = (Array.isArray(cartItems) && cartItems.length > 0
+    ? cartItems
+    : [{ id: 0, title: 'Compra', subtitle: '', price: parsedAmount, quantity: 1, cartId: siteTransactionId }]
+  ).map((item, idx) => {
+    const qty = Math.max(1, parseInt(item.quantity, 10) || 1);
+    const unitPesos = Math.round(Number(item.price) || 0);
+    const unitCents = unitPesos * 100;
+    const desc = csText([item.title, item.subtitle].filter(Boolean).join(' — '));
+    return {
+      code: 'Apparel',
+      description: desc,
+      name: csText(item.title),
+      sku: csText(
+        item.cartId != null && String(item.cartId)
+          ? String(item.cartId)
+          : (item.id != null ? `${item.id}-${idx}` : `item-${idx}`),
+        'SKU',
+      ),
+      quantity: qty,
+      unit_price: unitCents,
+      total_amount: unitCents * qty,
+    };
+  });
+
   try {
     const decidirBody = {
       site_transaction_id: siteTransactionId,
@@ -214,6 +244,7 @@ app.post('/api/payway-payment', async (req, res) => {
           tax_voucher_required: false,
           customer_loyalty_number: '',
           coupon_code: '',
+          items: retailItems,
         },
       },
     };
