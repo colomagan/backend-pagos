@@ -134,7 +134,7 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 app.post('/api/payway-payment', async (req, res) => {
-  const { token, bin, paymentMethodId, amount, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra } = req.body;
+  const { token, bin, paymentMethodId, amount, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra, deviceUniqueId } = req.body;
 
   if (!token || !amount || !buyer?.email || !Array.isArray(cartItems)) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
@@ -164,6 +164,19 @@ app.post('/api/payway-payment', async (req, res) => {
       payment_type: 'single',
       email: buyer.email,
       sub_payments: [],
+      fraud_detection: {
+        send_to_cs: true,
+        channel: 'Web',
+        device_unique_id: deviceUniqueId || `dev-${Date.now()}`,
+        customer_in_site: {
+          days_in_site: 0,
+          is_guest: true,
+          password: '',
+          num_of_transactions: 1,
+          cellphone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
+          email: buyer.email,
+        },
+      },
     };
 
     console.log('📤 Decidir request:', JSON.stringify(decidirBody));
