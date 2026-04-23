@@ -185,10 +185,35 @@ app.post('/api/payway-payment', async (req, res) => {
           last_name: buyer.apellido || 'Nombre',
           phone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
           postal_code: addressComponents?.postcode || '1000',
-          state: addressComponents?.state || 'B',
+          state: 'B',
           street1: addressComponents?.road
             ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
-            : address || 'Sin dirección',
+            : address || 'Sin direccion',
+        },
+        purchase_totals: {
+          currency: 'ARS',
+          amount: parsedAmount * 100,
+        },
+        retail_transaction_data: {
+          ship_to: {
+            city: addressComponents?.city || addressComponents?.town || addressComponents?.municipality || 'Buenos Aires',
+            country: 'AR',
+            customer_id: buyer.email,
+            email: buyer.email,
+            first_name: buyer.nombre || 'Sin',
+            last_name: buyer.apellido || 'Nombre',
+            phone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
+            postal_code: addressComponents?.postcode || '1000',
+            state: 'B',
+            street1: addressComponents?.road
+              ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
+              : address || 'Sin direccion',
+          },
+          days_to_delivery: '3',
+          dispatch_method: 'homedelivery',
+          tax_voucher_required: false,
+          customer_loyalty_number: '',
+          coupon_code: '',
         },
       },
     };
