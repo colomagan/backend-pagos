@@ -176,6 +176,20 @@ app.post('/api/payway-payment', async (req, res) => {
           cellphone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
           email: buyer.email,
         },
+        bill_to: {
+          city: addressComponents?.city || addressComponents?.town || addressComponents?.municipality || 'Buenos Aires',
+          country: 'AR',
+          customer_id: buyer.email,
+          email: buyer.email,
+          first_name: buyer.nombre || 'Sin',
+          last_name: buyer.apellido || 'Nombre',
+          phone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
+          postal_code: addressComponents?.postcode || '1000',
+          state: addressComponents?.state || 'B',
+          street1: addressComponents?.road
+            ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
+            : address || 'Sin dirección',
+        },
       },
     };
 
