@@ -167,7 +167,7 @@ app.post('/api/payway-payment', async (req, res) => {
       fraud_detection: {
         send_to_cs: true,
         channel: 'Web',
-        device_unique_id: deviceUniqueId || `dev-${Date.now()}`,
+        device_fingerprint_id: deviceUniqueId || `${process.env.PAYWAY_SITE_ID || '93022169'}${Date.now()}`,
         customer_in_site: {
           days_in_site: 0,
           is_guest: true,
