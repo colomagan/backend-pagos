@@ -204,7 +204,7 @@ app.post('/api/payway-payment', async (req, res) => {
       sub_payments: [],
   
       fraud_detection: {
-        send_to_cs: false,
+        send_to_cs: true,
         channel: 'Web',
 
         device_fingerprint_id: deviceUniqueId,
