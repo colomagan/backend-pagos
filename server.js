@@ -136,8 +136,15 @@ app.get('/api/health', (_, res) => res.json({ ok: true }));
 app.post('/api/payway-payment', async (req, res) => {
   const { token, bin, paymentMethodId, amount, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra, deviceUniqueId } = req.body;
 
+  console.log('BACK deviceUniqueId (recibido):', deviceUniqueId);
+
   if (!token || !amount || !buyer?.email || !Array.isArray(cartItems)) {
     return res.status(400).json({ error: true, message: 'Datos incompletos' });
+  }
+
+  if (!deviceUniqueId) {
+    console.error('BACK ERROR: deviceUniqueId ausente — no se puede procesar sin fingerprint');
+    return res.status(400).json({ error: true, message: 'Falta device fingerprint ID' });
   }
 
   const parsedAmount = Math.round(Number(amount));
@@ -197,7 +204,7 @@ app.post('/api/payway-payment', async (req, res) => {
       fraud_detection: {
         send_to_cs: true,
         channel: 'Web',
-        device_fingerprint_id: deviceUniqueId || `${process.env.PAYWAY_SITE_ID || '93022169'}${Date.now()}`,
+        device_fingerprint_id: deviceUniqueId,
         customer_in_site: {
           days_in_site: 0,
           is_guest: true,
