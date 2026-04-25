@@ -200,52 +200,83 @@ app.post('/api/payway-payment', async (req, res) => {
       installments: 1,
       payment_type: 'single',
       email: buyer.email,
+  
+      // 🔥 IMPORTANTE: SIEMPRE FUERA de fraud_detection
+      device_fingerprint_id: deviceUniqueId,
+  
       sub_payments: [],
+  
       fraud_detection: {
         send_to_cs: true,
         channel: 'Web',
-        device_fingerprint_id: deviceUniqueId,
+  
         customer_in_site: {
           days_in_site: 0,
           is_guest: true,
           password: '',
           num_of_transactions: 1,
-          cellphone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
+          cellphone_number: buyer.telefono
+            ? String(buyer.telefono).replace(/\D/g, '')
+            : '5491100000001',
           email: buyer.email,
         },
+  
         bill_to: {
-          city: addressComponents?.city || addressComponents?.town || addressComponents?.municipality || 'Buenos Aires',
+          city:
+            addressComponents?.city ||
+            addressComponents?.town ||
+            addressComponents?.municipality ||
+            'Buenos Aires',
+  
           country: 'AR',
           customer_id: buyer.email,
           email: buyer.email,
           first_name: buyer.nombre || 'Sin',
           last_name: buyer.apellido || 'Nombre',
-          phone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
+  
+          phone_number: buyer.telefono
+            ? String(buyer.telefono).replace(/\D/g, '')
+            : '5491100000001',
+  
           postal_code: addressComponents?.postcode || '1000',
           state: 'B',
+  
           street1: addressComponents?.road
             ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
             : address || 'Sin direccion',
         },
+  
         purchase_totals: {
           currency: 'ARS',
           amount: parsedAmount * 100,
         },
+  
         retail_transaction_data: {
           ship_to: {
-            city: addressComponents?.city || addressComponents?.town || addressComponents?.municipality || 'Buenos Aires',
+            city:
+              addressComponents?.city ||
+              addressComponents?.town ||
+              addressComponents?.municipality ||
+              'Buenos Aires',
+  
             country: 'AR',
             customer_id: buyer.email,
             email: buyer.email,
             first_name: buyer.nombre || 'Sin',
             last_name: buyer.apellido || 'Nombre',
-            phone_number: buyer.telefono ? String(buyer.telefono).replace(/\D/g, '') : '5491100000001',
+  
+            phone_number: buyer.telefono
+              ? String(buyer.telefono).replace(/\D/g, '')
+              : '5491100000001',
+  
             postal_code: addressComponents?.postcode || '1000',
             state: 'B',
+  
             street1: addressComponents?.road
               ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
               : address || 'Sin direccion',
           },
+  
           days_to_delivery: '3',
           dispatch_method: 'homedelivery',
           tax_voucher_required: false,
@@ -255,107 +286,165 @@ app.post('/api/payway-payment', async (req, res) => {
         },
       },
     };
-
-    console.log('📤 Decidir request:', JSON.stringify(decidirBody));
-
+  
+    console.log('📤 Decidir request:', JSON.stringify(decidirBody, null, 2));
+  
     const decidirRes = await fetch(`${baseUrl}/payments`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': process.env.PAYWAY_PRIVATE_KEY,
+        apikey: process.env.PAYWAY_PRIVATE_KEY,
       },
       body: JSON.stringify(decidirBody),
     });
-
+  
     const rawText = await decidirRes.text();
     console.log(`📥 Decidir HTTP ${decidirRes.status}:`, rawText);
-
+  
     let decidirData = {};
-    try { decidirData = JSON.parse(rawText); } catch {}
-
+    try {
+      decidirData = JSON.parse(rawText);
+    } catch (e) {
+      console.error('❌ JSON inválido de Decidir:', rawText);
+    }
+  
     const status = decidirData.status || 'rejected';
     const statusDetail = decidirData.status_detail || '';
-    const decidirPaymentId = typeof decidirData.id === 'number' ? decidirData.id : null;
-
+    const decidirPaymentId =
+      typeof decidirData.id === 'number' ? decidirData.id : null;
+  
     console.log(`💳 Decidir ${decidirPaymentId} → ${status} (${statusDetail})`);
-
+  
+    // ─────────────────────────────────────────────
+    // ADDRESS NORMALIZADO
+    // ─────────────────────────────────────────────
+  
     const addr = {
-      display:      address || '',
-      calle:        addressComponents?.road
-                      ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
-                      : '',
-      barrio:       addressComponents?.suburb || addressComponents?.neighbourhood || '',
-      ciudad:       addressComponents?.city || '',
+      display: address || '',
+      calle: addressComponents?.road
+        ? `${addressComponents.road}${addressComponents.house_number ? ' ' + addressComponents.house_number : ''}`
+        : '',
+      barrio:
+        addressComponents?.suburb ||
+        addressComponents?.neighbourhood ||
+        '',
+      ciudad: addressComponents?.city || '',
       codigoPostal: addressComponents?.postcode || '',
     };
-
+  
     let internalOrderId = null;
-    if (status !== 'rejected') try {
-      const { data: order, error: orderError } = await supabase
-        .from('orders')
-        .insert({
-          ...(decidirPaymentId ? { mp_payment_id: decidirPaymentId } : {}),
-          payment_method:   'tarjeta',
-          status,
-          status_detail:    statusDetail,
-          total:            parsedAmount,
-          buyer_name:       buyer.nombre,
-          buyer_lastname:   buyer.apellido,
-          buyer_email:      buyer.email,
-          buyer_phone:      buyer.telefono ? String(buyer.telefono) : null,
-          address_display:  address || '',
-          address_street:   addr.calle,
-          address_barrio:   addr.barrio,
-          address_city:     addr.ciudad,
-          address_postcode: addr.codigoPostal,
-          address_notes:    notes || '',
-          address_type:     addressType || null,
-          address_piso:     piso || null,
-          address_letra:    letra || null,
-        })
-        .select('id')
-        .single();
-
-      if (orderError) throw orderError;
-
-      const items = cartItems.map(item => ({
-        order_id:    order.id,
-        product_id:  item.id,
-        title:       item.title,
-        subtitle:    item.subtitle || null,
-        color_name:  item.color?.name || null,
-        color_value: item.color?.value || null,
-        size:        item.size || null,
-        quantity:    item.quantity,
-        unit_price:  item.price,
-      }));
-
-      const { error: itemsError } = await supabase.from('order_items').insert(items);
-      if (itemsError) throw itemsError;
-
-      internalOrderId = order.id;
-      console.log(`💾 Orden #${internalOrderId} guardada [${status}]`);
-    } catch (err) {
-      console.error('❌ Error guardando orden:', err.message);
+  
+    // ─────────────────────────────────────────────
+    // GUARDAR SOLO SI NO ES RECHAZADO
+    // ─────────────────────────────────────────────
+  
+    if (status !== 'rejected') {
+      try {
+        const { data: order, error: orderError } = await supabase
+          .from('orders')
+          .insert({
+            ...(decidirPaymentId
+              ? { mp_payment_id: decidirPaymentId }
+              : {}),
+  
+            payment_method: 'tarjeta',
+            status,
+            status_detail: statusDetail,
+            total: parsedAmount,
+  
+            buyer_name: buyer.nombre,
+            buyer_lastname: buyer.apellido,
+            buyer_email: buyer.email,
+            buyer_phone: buyer.telefono
+              ? String(buyer.telefono)
+              : null,
+  
+            address_display: address || '',
+            address_street: addr.calle,
+            address_barrio: addr.barrio,
+            address_city: addr.ciudad,
+            address_postcode: addr.codigoPostal,
+  
+            address_notes: notes || '',
+            address_type: addressType || null,
+            address_piso: piso || null,
+            address_letra: letra || null,
+          })
+          .select('id')
+          .single();
+  
+        if (orderError) throw orderError;
+  
+        const items = cartItems.map((item) => ({
+          order_id: order.id,
+          product_id: item.id,
+          title: item.title,
+          subtitle: item.subtitle || null,
+          color_name: item.color?.name || null,
+          color_value: item.color?.value || null,
+          size: item.size || null,
+          quantity: item.quantity,
+          unit_price: item.price,
+        }));
+  
+        const { error: itemsError } = await supabase
+          .from('order_items')
+          .insert(items);
+  
+        if (itemsError) throw itemsError;
+  
+        internalOrderId = order.id;
+  
+        console.log(`💾 Orden #${internalOrderId} guardada [${status}]`);
+      } catch (err) {
+        console.error('❌ Error guardando orden:', err.message);
+      }
     }
-
-    if (status === 'approved' || status === 'pending' || status === 'in_process') {
+  
+    // ─────────────────────────────────────────────
+    // EMAILS
+    // ─────────────────────────────────────────────
+  
+    if (
+      status === 'approved' ||
+      status === 'pending' ||
+      status === 'in_process'
+    ) {
       sendOrderEmails({
         buyer,
-        addr: { ...addr, notes: notes || '', tipo: addressType || '', piso: piso || '', letra: letra || '' },
+        addr: {
+          ...addr,
+          notes: notes || '',
+          tipo: addressType || '',
+          piso: piso || '',
+          letra: letra || '',
+        },
         cartItems,
-        total:        parsedAmount,
-        orderId:      internalOrderId || siteTransactionId,
+        total: parsedAmount,
+        orderId: internalOrderId || siteTransactionId,
         status,
         statusDetail,
-      }).catch(err => console.error('❌ Error enviando emails:', err.message));
+      }).catch((err) =>
+        console.error('❌ Error enviando emails:', err.message)
+      );
     }
-
-    res.json({ status, id: internalOrderId || decidirPaymentId, detail: statusDetail });
-
+  
+    // ─────────────────────────────────────────────
+    // RESPONSE FINAL
+    // ─────────────────────────────────────────────
+  
+    res.json({
+      status,
+      id: internalOrderId || decidirPaymentId,
+      detail: statusDetail,
+    });
+  
   } catch (err) {
     console.error('❌ Error payway-payment:', err.message);
-    res.status(500).json({ error: true, message: 'Error al procesar el pago.' });
+    res.status(500).json({
+      error: true,
+      message: 'Error al procesar el pago.',
+    });
   }
 });
 
