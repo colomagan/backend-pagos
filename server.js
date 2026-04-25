@@ -201,15 +201,14 @@ app.post('/api/payway-payment', async (req, res) => {
       payment_type: 'single',
       email: buyer.email,
   
-      // 🔥 IMPORTANTE: SIEMPRE FUERA de fraud_detection
-      device_fingerprint_id: deviceUniqueId,
-  
       sub_payments: [],
   
       fraud_detection: {
         send_to_cs: true,
         channel: 'Web',
-  
+
+        device_fingerprint_id: deviceUniqueId,
+        
         customer_in_site: {
           days_in_site: 0,
           is_guest: true,
