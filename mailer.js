@@ -724,41 +724,67 @@ async function sendNewsletterEmail({ email }) {
 
 // ── Función principal — envía siempre, para todos los estados ─────────────────
 
+// Transporter del comprador con fallback al principal si las credenciales no están
+function getBuyerTransporter() {
+  if (process.env.BUYER_EMAIL_PASS) return buyerTransporter;
+  console.warn('⚠️  BUYER_EMAIL_PASS no configurado — usando transporter principal para email al comprador');
+  return transporter;
+}
+
+function getBuyerFrom() {
+  if (process.env.BUYER_EMAIL_PASS) {
+    return `"Azter" <${process.env.BUYER_EMAIL_USER || 'noreply@azterstudio.com'}>`;
+  }
+  return `"Azter" <${process.env.EMAIL_USER}>`;
+}
+
 async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId }) {
   const siteUrl = process.env.SITE_URL || '';
 
   const subjectEmojis = { approved: '🛍️', pending: '⏳', rejected: '⚠️' };
   const emoji = subjectEmojis[status] || '📋';
 
-  // Email al dueño — siempre, con todos los datos recolectados
-  await transporter.sendMail({
-    from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
-    to: process.env.STORE_EMAIL,
-    subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
-    html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
-  });
-  console.log(`📧 Email al dueño enviado [${status}] — ${buyer.email}`);
-
-  // Email al comprador — solo approved
-  if (status === 'approved') {
-    await buyerTransporter.sendMail({
-      from: `"Azter" <${process.env.BUYER_EMAIL_USER || 'noreply@azterstudio.com'}>`,
-      to: buyer.email,
-      subject: `🛍️ Tu pedido fue confirmado — Orden #${orderId}`,
-      html: buyerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, siteUrl }),
+  // Email al dueño — siempre, independiente
+  try {
+    await transporter.sendMail({
+      from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
+      to: process.env.STORE_EMAIL,
+      subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
+      html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
     });
-    console.log(`📧 Email al comprador enviado [approved] — ${buyer.email}`);
+    console.log(`📧 Email al dueño enviado [${status}] — ${buyer.email}`);
+  } catch (err) {
+    console.error(`❌ Error email dueño [${status}]: ${err.message}`);
+  }
+
+  // Email al comprador — approved
+  if (status === 'approved') {
+    try {
+      await getBuyerTransporter().sendMail({
+        from: getBuyerFrom(),
+        to: buyer.email,
+        subject: `🛍️ Tu pedido fue confirmado — Orden #${orderId}`,
+        html: buyerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, siteUrl }),
+      });
+      console.log(`📧 Email al comprador enviado [approved] — ${buyer.email}`);
+    } catch (err) {
+      console.error(`❌ Error email comprador [approved]: ${err.message}`);
+    }
   }
 
   // Email al comprador — rechazado
   if (status === 'rejected') {
-    await buyerTransporter.sendMail({
-      from: `"Azter" <${process.env.BUYER_EMAIL_USER || 'noreply@azterstudio.com'}>`,
-      to: buyer.email,
-      subject: `⚠️ Hubo un problema con tu pago — Azter`,
-      html: rejectedBuyerEmailHTML({ buyer, cartItems, total, statusDetail, siteUrl }),
-    });
-    console.log(`📧 Email al comprador enviado [rejected] — ${buyer.email}`);
+    try {
+      await getBuyerTransporter().sendMail({
+        from: getBuyerFrom(),
+        to: buyer.email,
+        subject: `⚠️ Hubo un problema con tu pago — Azter`,
+        html: rejectedBuyerEmailHTML({ buyer, cartItems, total, statusDetail, siteUrl }),
+      });
+      console.log(`📧 Email al comprador enviado [rejected] — ${buyer.email}`);
+    } catch (err) {
+      console.error(`❌ Error email comprador [rejected]: ${err.message}`);
+    }
   }
 }
 
