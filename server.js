@@ -64,6 +64,8 @@ app.post('/api/process-transfer', upload.single('voucher'), async (req, res) => 
         buyer_lastname:   buyerObj.apellido,
         buyer_email:      buyerObj.email,
         buyer_phone:      String(buyerObj.telefono),
+        buyer_doc_type:   buyerObj.docType   || null,
+        buyer_doc_number: buyerObj.docNumber || null,
         address_display:  address || '',
         address_street:   addr.calle,
         address_barrio:   addr.barrio,
@@ -357,7 +359,9 @@ app.post('/api/payway-payment', async (req, res) => {
             buyer_phone: buyer.telefono
               ? String(buyer.telefono)
               : null,
-  
+            buyer_doc_type:   buyer.docType   || null,
+            buyer_doc_number: buyer.docNumber || null,
+
             address_display: address || '',
             address_street: addr.calle,
             address_barrio: addr.barrio,
@@ -423,6 +427,8 @@ app.post('/api/payway-payment', async (req, res) => {
         orderId: internalOrderId || siteTransactionId,
         status,
         statusDetail,
+        paymentMethod: 'tarjeta',
+        paymentId: decidirPaymentId,
       }).catch((err) =>
         console.error('❌ Error enviando emails:', err.message)
       );

@@ -15,6 +15,21 @@ const formatPrice = (n) =>
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function docTypeLabel(type) {
+  const map = { '80': 'DNI', '86': 'LE', '87': 'LC', '89': 'CI', '96': 'Pasaporte' };
+  return map[String(type)] || type || 'Documento';
+}
+
+function addressTypeLabel(tipo) {
+  const map = { 'casa': 'Casa', 'departamento': 'Departamento', 'otro': 'Otro' };
+  return map[String(tipo).toLowerCase()] || tipo;
+}
+
+function paymentMethodLabel(method) {
+  const map = { 'tarjeta': 'Tarjeta de crédito/débito', 'transferencia': 'Transferencia bancaria' };
+  return map[method] || method || '—';
+}
+
 function statusDetailLabel(detail) {
   const map = {
     cc_rejected_insufficient_amount:       'Fondos insuficientes',
@@ -81,11 +96,14 @@ function itemsRows(cartItems, siteUrl) {
 
 function addressBlock(addr) {
   const rows = [
+    ['Tipo',              addr.tipo  ? addressTypeLabel(addr.tipo)  : null],
     ['Dirección completa', addr.display],
     ['Calle',             addr.calle],
     ['Barrio',            addr.barrio],
     ['Ciudad',            addr.ciudad],
     ['Código postal',     addr.codigoPostal],
+    ['Piso',              addr.piso],
+    ['Depto / Letra',     addr.letra],
     ['Notas',             addr.notes],
   ].filter(([, v]) => v);
 
@@ -98,7 +116,7 @@ function addressBlock(addr) {
 
 // ── Email dueño — universal (todos los estados) ───────────────────────────────
 
-function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, siteUrl }) {
+function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }) {
   const isApproved = status === 'approved';
   const subjectLabel = isApproved ? 'Nueva venta recibida' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra — pago rechazado';
   return `<!DOCTYPE html>
@@ -122,6 +140,28 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, status
         <td style="padding:28px 40px 0;text-align:center;">
           ${statusBadgeOwner(status, statusDetail)}
           ${orderId ? `<p style="margin:10px 0 0;font-size:12px;color:#aaa;letter-spacing:0.1em;">Orden #${orderId}</p>` : ''}
+        </td>
+      </tr>
+
+      <!-- Método de pago -->
+      <tr>
+        <td style="padding:20px 40px 0;">
+          <p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Pago</p>
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;width:130px;">Método</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${paymentMethodLabel(paymentMethod)}</td>
+            </tr>
+            ${paymentId ? `
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;">ID transacción</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;font-family:monospace;">${paymentId}</td>
+            </tr>` : ''}
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;">Estado</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${status}${statusDetail ? ` — ${statusDetailLabel(statusDetail)}` : ''}</td>
+            </tr>
+          </table>
         </td>
       </tr>
 
@@ -171,6 +211,11 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, status
                 <a href="tel:${buyer.telefono}" style="color:#111;">${buyer.telefono}</a>
               </td>
             </tr>
+            ${buyer.docNumber ? `
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;">${docTypeLabel(buyer.docType)}</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${buyer.docNumber}</td>
+            </tr>` : ''}
           </table>
         </td>
       </tr>
@@ -393,7 +438,7 @@ async function sendNewsletterEmail({ email }) {
 
 // ── Función principal — envía siempre, para todos los estados ─────────────────
 
-async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status, statusDetail }) {
+async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId }) {
   const siteUrl = process.env.SITE_URL || '';
 
   const subjectEmojis = { approved: '🛍️', pending: '⏳', rejected: '⚠️' };
@@ -404,7 +449,7 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
     from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
     to: process.env.STORE_EMAIL,
     subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
-    html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, siteUrl }),
+    html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
   };
 
   await transporter.sendMail(ownerMail);
