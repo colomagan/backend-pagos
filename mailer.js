@@ -42,6 +42,20 @@ function paymentMethodLabel(method) {
 
 function statusDetailLabel(detail) {
   const map = {
+    // Decidir / PayWay error types
+    invalid_number:               'Número de tarjeta inválido',
+    insufficient_amount:          'Fondos insuficientes',
+    bad_filled_security_code:     'Código de seguridad incorrecto',
+    bad_filled_date:              'Fecha de vencimiento incorrecta',
+    card_disabled:                'Tarjeta bloqueada',
+    call_for_authorize:           'Requiere autorización del banco',
+    high_risk:                    'Rechazada por riesgo',
+    blacklist:                    'Tarjeta no permitida',
+    other_reason:                 'Error general de tarjeta',
+    bad_filled_other:             'Datos de tarjeta incorrectos',
+    max_attempts:                 'Máximo de intentos alcanzado',
+    duplicated_payment:           'Pago duplicado',
+    // MercadoPago (legacy)
     cc_rejected_insufficient_amount:       'Fondos insuficientes',
     cc_rejected_bad_filled_security_code:  'Código de seguridad incorrecto',
     cc_rejected_bad_filled_date:           'Fecha de vencimiento incorrecta',
@@ -51,11 +65,11 @@ function statusDetailLabel(detail) {
     cc_rejected_blacklist:                 'Tarjeta no permitida',
     cc_rejected_other_reason:              'Error general de tarjeta',
     cc_rejected_bad_filled_other:          'Datos de tarjeta incorrectos',
-    cc_rejected_max_attempts:             'Máximo de intentos alcanzado',
+    cc_rejected_max_attempts:              'Máximo de intentos alcanzado',
     cc_rejected_duplicated_payment:        'Pago duplicado',
-    pending_waiting_payment:              'Esperando pago',
-    pending_review_manual:                'En revisión manual',
-    pending_contingency:                  'Pendiente por contingencia',
+    pending_waiting_payment:               'Esperando pago',
+    pending_review_manual:                 'En revisión manual',
+    pending_contingency:                   'Pendiente por contingencia',
   };
   return map[detail] || detail || 'Sin detalle';
 }

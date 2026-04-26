@@ -310,7 +310,11 @@ app.post('/api/payway-payment', async (req, res) => {
     }
   
     const status = decidirData.status || 'rejected';
-    const statusDetail = decidirData.status_detail || '';
+    const statusDetail =
+      decidirData.status_details?.error?.type ||
+      decidirData.status_details?.error?.reason?.description ||
+      decidirData.status_detail ||
+      '';
     const decidirPaymentId =
       typeof decidirData.id === 'number' ? decidirData.id : null;
   
@@ -336,11 +340,10 @@ app.post('/api/payway-payment', async (req, res) => {
     let internalOrderId = null;
   
     // ─────────────────────────────────────────────
-    // GUARDAR SOLO SI NO ES RECHAZADO
+    // GUARDAR SIEMPRE (aprobado, pendiente, rechazado)
     // ─────────────────────────────────────────────
-  
-    if (status !== 'rejected') {
-      try {
+
+    try {
         const { data: order, error: orderError } = await supabase
           .from('orders')
           .insert({
@@ -399,41 +402,34 @@ app.post('/api/payway-payment', async (req, res) => {
         internalOrderId = order.id;
   
         console.log(`💾 Orden #${internalOrderId} guardada [${status}]`);
-      } catch (err) {
-        console.error('❌ Error guardando orden:', err.message);
-      }
+    } catch (err) {
+      console.error('❌ Error guardando orden:', err.message);
     }
-  
+
     // ─────────────────────────────────────────────
     // EMAILS
     // ─────────────────────────────────────────────
-  
-    if (
-      status === 'approved' ||
-      status === 'pending' ||
-      status === 'in_process'
-    ) {
-      sendOrderEmails({
-        buyer,
-        addr: {
-          ...addr,
-          notes: notes || '',
-          tipo: addressType || '',
-          piso: piso || '',
-          letra: letra || '',
-        },
-        cartItems,
-        total: parsedAmount,
-        orderId: internalOrderId || siteTransactionId,
-        status,
-        statusDetail,
-        paymentMethod: 'tarjeta',
-        paymentId: decidirPaymentId,
-      }).catch((err) =>
-        console.error('❌ Error enviando emails:', err.message)
-      );
-    }
-  
+
+    sendOrderEmails({
+      buyer,
+      addr: {
+        ...addr,
+        notes: notes || '',
+        tipo: addressType || '',
+        piso: piso || '',
+        letra: letra || '',
+      },
+      cartItems,
+      total: parsedAmount,
+      orderId: internalOrderId || siteTransactionId,
+      status,
+      statusDetail,
+      paymentMethod: 'tarjeta',
+      paymentId: decidirPaymentId,
+    }).catch((err) =>
+      console.error('❌ Error enviando emails:', err.message)
+    );
+
     // ─────────────────────────────────────────────
     // RESPONSE FINAL
     // ─────────────────────────────────────────────
