@@ -788,4 +788,196 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   }
 }
 
-module.exports = { sendOrderEmails, sendContactEmail, sendNewsletterEmail };
+// ── Email dueño — transferencia pendiente ─────────────────────────────────────
+
+function ownerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl, transferProofUrls }) {
+  const proofLinks = (transferProofUrls || []).map((url, i) =>
+    `<a href="${url}" target="_blank" style="display:block;margin-bottom:6px;color:#2563eb;font-size:13px;word-break:break-all;">Ver comprobante ${i + 1}</a>`
+  ).join('');
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      <tr>
+        <td style="background:#111;padding:36px 40px;text-align:center;">
+          <p style="margin:0 0 6px;font-size:28px;font-weight:900;color:#fff;letter-spacing:6px;">AZTER</p>
+          <p style="margin:0;font-size:11px;color:#888;letter-spacing:3px;text-transform:uppercase;">Nueva transferencia pendiente</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:28px 40px 0;text-align:center;">
+          <span style="display:inline-block;background:#eff6ff;color:#2563eb;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">💳 &nbsp;Transferencia pendiente</span>
+          ${orderId ? `<p style="margin:10px 0 0;font-size:12px;color:#aaa;letter-spacing:0.1em;">Orden #${orderId}</p>` : ''}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:28px 40px 0;">
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Artículos</p>
+          <table width="100%" cellpadding="0" cellspacing="0">${itemsRows(cartItems, siteUrl)}</table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:16px 40px 28px;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:14px 0;border-top:2px solid #111;font-size:15px;font-weight:700;color:#111;">Total</td>
+              <td style="padding:14px 0;border-top:2px solid #111;font-size:18px;font-weight:900;color:#111;text-align:right;">${formatPrice(total)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      <tr><td style="height:1px;background:#f0f0f0;"></td></tr>
+      <tr>
+        <td style="padding:28px 40px 0;">
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Datos del comprador</p>
+          <table cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;width:130px;">Nombre</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${buyer.nombre} ${buyer.apellido}</td>
+            </tr>
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;">Email</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;"><a href="mailto:${buyer.email}" style="color:#111;">${buyer.email}</a></td>
+            </tr>
+            <tr>
+              <td style="padding:6px 0;font-size:12px;color:#888;">Teléfono</td>
+              <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;"><a href="tel:${buyer.telefono}" style="color:#111;">${buyer.telefono}</a></td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:24px 40px 0;">
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Dirección de envío</p>
+          <table cellpadding="0" cellspacing="0">${addressBlock(addr)}</table>
+        </td>
+      </tr>
+      ${proofLinks ? `
+      <tr>
+        <td style="padding:24px 40px 36px;">
+          <p style="margin:0 0 12px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Comprobantes subidos</p>
+          ${proofLinks}
+        </td>
+      </tr>` : ''}
+      <tr>
+        <td style="background:#f9f9f9;padding:20px 40px;text-align:center;border-top:1px solid #f0f0f0;">
+          <p style="margin:0;font-size:11px;color:#bbb;letter-spacing:0.05em;">AZTER — Panel de ventas &nbsp;·&nbsp; ${new Date().toLocaleDateString('es-AR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ── Email comprador — transferencia enviada ───────────────────────────────────
+
+function buyerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }) {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:Arial,Helvetica,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 16px;">
+  <tr><td align="center">
+    <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+      <tr>
+        <td style="background:#111;padding:40px;text-align:center;">
+          <p style="margin:0 0 10px;font-size:28px;font-weight:900;color:#fff;letter-spacing:6px;">AZTER</p>
+          <p style="margin:0;font-size:20px;font-weight:700;color:#fff;">Recibimos tu comprobante ✓</p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:36px 40px 0;text-align:center;">
+          <p style="margin:0 0 8px;font-size:15px;color:#333;line-height:1.6;">
+            Hola <strong>${buyer.nombre}</strong>, recibimos tu comprobante de transferencia.<br>
+            Vamos a revisarlo y te avisamos por email cuando confirmemos tu pedido.
+          </p>
+          <p style="margin:16px 0 0;display:inline-block;background:#111;color:#fff;padding:10px 24px;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:0.15em;">
+            ORDEN #${orderId}
+          </p>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:32px 40px 0;">
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Tu pedido</p>
+          <table width="100%" cellpadding="0" cellspacing="0">${itemsRows(cartItems, siteUrl)}</table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:16px 40px 0;">
+          <table width="100%" cellpadding="0" cellspacing="0">
+            <tr>
+              <td style="padding:12px 0;border-top:2px solid #111;font-size:15px;font-weight:700;color:#111;">Total</td>
+              <td style="padding:12px 0;border-top:2px solid #111;font-size:18px;font-weight:900;color:#111;text-align:right;">${formatPrice(total)}</td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      <tr><td style="height:1px;background:#f0f0f0;"></td></tr>
+      <tr>
+        <td style="padding:28px 40px;">
+          <p style="margin:0 0 16px;font-size:11px;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;color:#888;">Dirección de envío</p>
+          <table cellpadding="0" cellspacing="0">${addressBlock(addr)}</table>
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:0 40px 36px;">
+          <table width="100%" cellpadding="0" cellspacing="0" style="background:#f9f9f9;border-radius:8px;">
+            <tr>
+              <td style="padding:20px 24px;">
+                <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:#111;">¿Qué sigue?</p>
+                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">🔍 &nbsp;Vamos a verificar tu transferencia en las próximas horas.</p>
+                <p style="margin:0 0 8px;font-size:13px;color:#555;line-height:1.6;">📧 &nbsp;Te avisamos a <strong>${buyer.email}</strong> cuando tu pedido esté confirmado.</p>
+                <p style="margin:0;font-size:13px;color:#555;line-height:1.6;">❓ &nbsp;¿Tenés alguna duda? Respondé este email y te ayudamos.</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+      <tr>
+        <td style="background:#111;padding:24px 40px;text-align:center;">
+          <p style="margin:0 0 4px;font-size:13px;font-weight:700;color:#fff;letter-spacing:4px;">AZTER</p>
+          <p style="margin:0;font-size:11px;color:#666;">© ${new Date().getFullYear()} Azter. Todos los derechos reservados.</p>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+}
+
+async function sendTransferOrderEmails({ buyer, addr, cartItems, total, orderId, transferProofUrls }) {
+  const siteUrl = process.env.SITE_URL || '';
+
+  try {
+    await transporter.sendMail({
+      from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
+      to: process.env.STORE_EMAIL,
+      subject: `💳 Nueva transferencia pendiente — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
+      html: ownerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl, transferProofUrls }),
+    });
+    console.log(`📧 Email transferencia al dueño enviado — ${buyer.email}`);
+  } catch (err) {
+    console.error(`❌ Error email dueño transferencia: ${err.message}`);
+  }
+
+  try {
+    await getBuyerTransporter().sendMail({
+      from: getBuyerFrom(),
+      to: buyer.email,
+      subject: `⏳ Revisando tu transferencia — Pedido #${orderId}`,
+      html: buyerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }),
+    });
+    console.log(`📧 Email transferencia al comprador enviado — ${buyer.email}`);
+  } catch (err) {
+    console.error(`❌ Error email comprador transferencia: ${err.message}`);
+  }
+}
+
+module.exports = { sendOrderEmails, sendTransferOrderEmails, sendContactEmail, sendNewsletterEmail };

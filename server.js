@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
-const { sendOrderEmails, sendContactEmail, sendNewsletterEmail } = require('./mailer');
+const { sendOrderEmails, sendTransferOrderEmails, sendContactEmail, sendNewsletterEmail } = require('./mailer');
 const { supabase } = require('./supabase');
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
@@ -103,6 +103,82 @@ app.post('/api/process-transfer', upload.single('voucher'), async (req, res) => 
   } catch (err) {
     console.error('❌ Error process-transfer:', err.message);
     res.status(500).json({ error: true, message: 'Error al procesar la transferencia.' });
+  }
+});
+
+app.post('/api/bank-transfer-order', async (req, res) => {
+  const { buyer, address, cartItems, total, transferProofUrls } = req.body;
+
+  if (!buyer || !address || !cartItems || !total || !transferProofUrls?.length) {
+    return res.status(400).json({ error: true, message: 'Datos incompletos' });
+  }
+
+  try {
+    const addr = {
+      display:      address.display   || '',
+      calle:        address.street    || '',
+      barrio:       address.barrio    || '',
+      ciudad:       address.city      || '',
+      codigoPostal: address.postcode  || '',
+      notes:        address.notes     || '',
+      tipo:         address.type      || '',
+      piso:         address.piso      || '',
+      letra:        address.letra     || '',
+    };
+
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        payment_method:      'bank_transfer',
+        transfer_proof_urls: transferProofUrls,
+        status:              'transfer_pending',
+        status_detail:       'Transferencia bancaria — pendiente de verificación',
+        total:               Math.round(total),
+        buyer_name:          buyer.nombre,
+        buyer_lastname:      buyer.apellido,
+        buyer_email:         buyer.email,
+        buyer_phone:         String(buyer.telefono),
+        buyer_doc_type:      buyer.docType   || null,
+        buyer_doc_number:    buyer.docNumber || null,
+        address_display:     addr.display,
+        address_street:      addr.calle,
+        address_barrio:      addr.barrio,
+        address_city:        addr.ciudad,
+        address_postcode:    addr.codigoPostal,
+        address_notes:       addr.notes || '',
+        address_type:        address.type   || null,
+        address_piso:        address.piso   || null,
+        address_letra:       address.letra  || null,
+      })
+      .select('id')
+      .single();
+
+    if (orderError) throw orderError;
+
+    const items = cartItems.map(item => ({
+      order_id:    order.id,
+      product_id:  item.id,
+      title:       item.title,
+      subtitle:    item.subtitle || null,
+      color_name:  item.color?.name  || null,
+      color_value: item.color?.value || null,
+      size:        item.size   || null,
+      quantity:    item.quantity,
+      unit_price:  item.price,
+    }));
+
+    const { error: itemsError } = await supabase.from('order_items').insert(items);
+    if (itemsError) throw itemsError;
+
+    console.log(`💾 Transferencia #${order.id} guardada`);
+
+    sendTransferOrderEmails({ buyer, addr, cartItems, total, orderId: order.id, transferProofUrls })
+      .catch(err => console.error('Error enviando emails de transferencia:', err.message));
+
+    res.json({ success: true, orderId: order.id });
+  } catch (err) {
+    console.error('❌ Error bank-transfer-order:', err.message);
+    res.status(500).json({ error: true, message: 'Error al registrar el pedido. Intentá de nuevo.' });
   }
 });
 
