@@ -4,7 +4,10 @@ const { supabase } = require('./supabase');
 async function getOrderNotifyEmails() {
   const { data } = await supabase.from('order_notify_emails').select('email');
   const emails = (data ?? []).map(r => r.email).filter(Boolean);
-  return emails.length > 0 ? emails.join(',') : process.env.STORE_EMAIL;
+  if (emails.length > 0) return emails.join(',');
+  if (process.env.STORE_EMAIL) return process.env.STORE_EMAIL;
+  console.error('❌ No hay emails de notificación configurados (tabla order_notify_emails vacía y STORE_EMAIL no seteado)');
+  return null;
 }
 
 const transporter = nodemailer.createTransport({
@@ -754,6 +757,8 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   // Email al dueño — siempre, independiente
   try {
     const notifyTo = await getOrderNotifyEmails();
+    if (!notifyTo) throw new Error('Sin destinatario — configurá STORE_EMAIL en Render o agregá emails en order_notify_emails');
+    console.log(`📤 Enviando email al dueño [${status}] → ${notifyTo}`);
     await transporter.sendMail({
       from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
       to: notifyTo,
@@ -768,6 +773,7 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   // Email al comprador — approved
   if (status === 'approved') {
     try {
+      console.log(`📤 Enviando email al comprador [approved] → ${buyer.email}`);
       await getBuyerTransporter().sendMail({
         from: getBuyerFrom(),
         to: buyer.email,
@@ -783,6 +789,7 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   // Email al comprador — rechazado
   if (status === 'rejected') {
     try {
+      console.log(`📤 Enviando email al comprador [rejected] → ${buyer.email}`);
       await getBuyerTransporter().sendMail({
         from: getBuyerFrom(),
         to: buyer.email,
@@ -965,6 +972,8 @@ async function sendTransferOrderEmails({ buyer, addr, cartItems, total, orderId,
 
   try {
     const notifyTo = await getOrderNotifyEmails();
+    if (!notifyTo) throw new Error('Sin destinatario — configurá STORE_EMAIL en Render o agregá emails en order_notify_emails');
+    console.log(`📤 Enviando email transferencia al dueño → ${notifyTo}`);
     await transporter.sendMail({
       from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
       to: notifyTo,
@@ -977,6 +986,7 @@ async function sendTransferOrderEmails({ buyer, addr, cartItems, total, orderId,
   }
 
   try {
+    console.log(`📤 Enviando email transferencia al comprador → ${buyer.email}`);
     await getBuyerTransporter().sendMail({
       from: getBuyerFrom(),
       to: buyer.email,
