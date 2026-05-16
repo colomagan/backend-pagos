@@ -1,4 +1,11 @@
 const nodemailer = require('nodemailer');
+const { supabase } = require('./supabase');
+
+async function getOrderNotifyEmails() {
+  const { data } = await supabase.from('order_notify_emails').select('email');
+  const emails = (data ?? []).map(r => r.email).filter(Boolean);
+  return emails.length > 0 ? emails.join(',') : process.env.STORE_EMAIL;
+}
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.hostinger.com',
@@ -746,9 +753,10 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
 
   // Email al dueño — siempre, independiente
   try {
+    const notifyTo = await getOrderNotifyEmails();
     await transporter.sendMail({
       from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
-      to: process.env.STORE_EMAIL,
+      to: notifyTo,
       subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
       html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
     });
@@ -956,9 +964,10 @@ async function sendTransferOrderEmails({ buyer, addr, cartItems, total, orderId,
   const siteUrl = process.env.SITE_URL || '';
 
   try {
+    const notifyTo = await getOrderNotifyEmails();
     await transporter.sendMail({
       from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
-      to: process.env.STORE_EMAIL,
+      to: notifyTo,
       subject: `💳 Nueva transferencia pendiente — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
       html: ownerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl, transferProofUrls }),
     });
