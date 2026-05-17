@@ -1,34 +1,16 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 const { supabase } = require('./supabase');
+
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 async function getOrderNotifyEmails() {
   const { data } = await supabase.from('order_notify_emails').select('email');
   const emails = (data ?? []).map(r => r.email).filter(Boolean);
-  if (emails.length > 0) return emails.join(',');
-  if (process.env.STORE_EMAIL) return process.env.STORE_EMAIL;
+  if (emails.length > 0) return emails;
+  if (process.env.STORE_EMAIL) return [process.env.STORE_EMAIL];
   console.error('❌ No hay emails de notificación configurados (tabla order_notify_emails vacía y STORE_EMAIL no seteado)');
   return null;
 }
-
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.hostinger.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: parseInt(process.env.EMAIL_PORT) === 465,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
-
-const buyerTransporter = nodemailer.createTransport({
-  host: 'smtp.hostinger.com',
-  port: 587,
-  secure: false,
-  auth: {
-    user: process.env.BUYER_EMAIL_USER || 'noreply@azterstudio.com',
-    pass: process.env.BUYER_EMAIL_PASS,
-  },
-});
 
 const formatPrice = (n) =>
   Number(n).toLocaleString('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 0 });
@@ -714,38 +696,24 @@ function newsletterEmailHTML({ email }) {
 // ── Envío de emails de contacto y newsletter ──────────────────────────────────
 
 async function sendContactEmail({ name, email, subject, message }) {
-  await transporter.sendMail({
-    from: `"Azter Contacto" <${process.env.EMAIL_USER}>`,
-    to: process.env.STORE_EMAIL,
-    replyTo: email,
+  const { error } = await resend.emails.send({
+    from: 'Azter Contacto <noreply@azterstudio.com>',
+    to: [process.env.STORE_EMAIL],
+    reply_to: email,
     subject: `📩 Contacto: ${subject}`,
     html: contactEmailHTML({ name, email, subject, message }),
   });
+  if (error) throw new Error(error.message);
 }
 
 async function sendNewsletterEmail({ email }) {
-  await transporter.sendMail({
-    from: `"Azter Newsletter" <${process.env.EMAIL_USER}>`,
-    to: process.env.STORE_EMAIL,
+  const { error } = await resend.emails.send({
+    from: 'Azter Newsletter <noreply@azterstudio.com>',
+    to: [process.env.STORE_EMAIL],
     subject: `📬 Nueva suscripción: ${email}`,
     html: newsletterEmailHTML({ email }),
   });
-}
-
-// ── Función principal — envía siempre, para todos los estados ─────────────────
-
-// Transporter del comprador con fallback al principal si las credenciales no están
-function getBuyerTransporter() {
-  if (process.env.BUYER_EMAIL_PASS) return buyerTransporter;
-  console.warn('⚠️  BUYER_EMAIL_PASS no configurado — usando transporter principal para email al comprador');
-  return transporter;
-}
-
-function getBuyerFrom() {
-  if (process.env.BUYER_EMAIL_PASS) {
-    return `"Azter" <${process.env.BUYER_EMAIL_USER || 'noreply@azterstudio.com'}>`;
-  }
-  return `"Azter" <${process.env.EMAIL_USER}>`;
+  if (error) throw new Error(error.message);
 }
 
 async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId }) {
@@ -754,18 +722,19 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   const subjectEmojis = { approved: '🛍️', pending: '⏳', rejected: '⚠️' };
   const emoji = subjectEmojis[status] || '📋';
 
-  // Email al dueño — siempre, independiente
+  // Email al dueño — siempre
   try {
     const notifyTo = await getOrderNotifyEmails();
     if (!notifyTo) throw new Error('Sin destinatario — configurá STORE_EMAIL en Render o agregá emails en order_notify_emails');
-    console.log(`📤 Enviando email al dueño [${status}] → ${notifyTo}`);
-    await transporter.sendMail({
-      from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
+    console.log(`📤 Enviando email al dueño [${status}] → ${notifyTo.join(',')}`);
+    const { error } = await resend.emails.send({
+      from: 'Azter Ventas <noreply@azterstudio.com>',
       to: notifyTo,
       subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
       html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
     });
-    console.log(`📧 Email al dueño enviado [${status}] — ${buyer.email}`);
+    if (error) throw new Error(error.message);
+    console.log(`📧 Email al dueño enviado [${status}]`);
   } catch (err) {
     console.error(`❌ Error email dueño [${status}]: ${err.message}`);
   }
@@ -774,13 +743,14 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   if (status === 'approved') {
     try {
       console.log(`📤 Enviando email al comprador [approved] → ${buyer.email}`);
-      await getBuyerTransporter().sendMail({
-        from: getBuyerFrom(),
-        to: buyer.email,
+      const { error } = await resend.emails.send({
+        from: 'Azter <noreply@azterstudio.com>',
+        to: [buyer.email],
         subject: `🛍️ Tu pedido fue confirmado — Orden #${orderId}`,
         html: buyerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, siteUrl }),
       });
-      console.log(`📧 Email al comprador enviado [approved] — ${buyer.email}`);
+      if (error) throw new Error(error.message);
+      console.log(`📧 Email al comprador enviado [approved]`);
     } catch (err) {
       console.error(`❌ Error email comprador [approved]: ${err.message}`);
     }
@@ -790,13 +760,14 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
   if (status === 'rejected') {
     try {
       console.log(`📤 Enviando email al comprador [rejected] → ${buyer.email}`);
-      await getBuyerTransporter().sendMail({
-        from: getBuyerFrom(),
-        to: buyer.email,
+      const { error } = await resend.emails.send({
+        from: 'Azter <noreply@azterstudio.com>',
+        to: [buyer.email],
         subject: `⚠️ Hubo un problema con tu pago — Azter`,
         html: rejectedBuyerEmailHTML({ buyer, cartItems, total, statusDetail, siteUrl }),
       });
-      console.log(`📧 Email al comprador enviado [rejected] — ${buyer.email}`);
+      if (error) throw new Error(error.message);
+      console.log(`📧 Email al comprador enviado [rejected]`);
     } catch (err) {
       console.error(`❌ Error email comprador [rejected]: ${err.message}`);
     }
@@ -973,27 +944,29 @@ async function sendTransferOrderEmails({ buyer, addr, cartItems, total, orderId,
   try {
     const notifyTo = await getOrderNotifyEmails();
     if (!notifyTo) throw new Error('Sin destinatario — configurá STORE_EMAIL en Render o agregá emails en order_notify_emails');
-    console.log(`📤 Enviando email transferencia al dueño → ${notifyTo}`);
-    await transporter.sendMail({
-      from: `"Azter Ventas" <${process.env.EMAIL_USER}>`,
+    console.log(`📤 Enviando email transferencia al dueño → ${notifyTo.join(',')}`);
+    const { error } = await resend.emails.send({
+      from: 'Azter Ventas <noreply@azterstudio.com>',
       to: notifyTo,
       subject: `💳 Nueva transferencia pendiente — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
       html: ownerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl, transferProofUrls }),
     });
-    console.log(`📧 Email transferencia al dueño enviado — ${buyer.email}`);
+    if (error) throw new Error(error.message);
+    console.log(`📧 Email transferencia al dueño enviado`);
   } catch (err) {
     console.error(`❌ Error email dueño transferencia: ${err.message}`);
   }
 
   try {
     console.log(`📤 Enviando email transferencia al comprador → ${buyer.email}`);
-    await getBuyerTransporter().sendMail({
-      from: getBuyerFrom(),
-      to: buyer.email,
+    const { error } = await resend.emails.send({
+      from: 'Azter <noreply@azterstudio.com>',
+      to: [buyer.email],
       subject: `⏳ Revisando tu transferencia — Pedido #${orderId}`,
       html: buyerTransferEmailHTML({ buyer, addr, cartItems, total, orderId, siteUrl }),
     });
-    console.log(`📧 Email transferencia al comprador enviado — ${buyer.email}`);
+    if (error) throw new Error(error.message);
+    console.log(`📧 Email transferencia al comprador enviado`);
   } catch (err) {
     console.error(`❌ Error email comprador transferencia: ${err.message}`);
   }
