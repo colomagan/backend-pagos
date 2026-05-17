@@ -212,7 +212,7 @@ app.post('/api/subscribe-newsletter', async (req, res) => {
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 app.post('/api/payway-payment', async (req, res) => {
-  const { token, bin, paymentMethodId, amount, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra, deviceUniqueId, installments } = req.body;
+  const { token, bin, paymentMethodId, amount, buyer, address, addressComponents, notes, cartItems, addressType, piso, letra, deviceUniqueId, installments, baseTotal, cuotaAmount, installmentCoef } = req.body;
 
   console.log('BACK deviceUniqueId (recibido):', deviceUniqueId);
 
@@ -497,6 +497,10 @@ app.post('/api/payway-payment', async (req, res) => {
       },
       cartItems,
       total: parsedAmount,
+      baseTotal: baseTotal ? Math.round(Number(baseTotal)) : parsedAmount,
+      cuotaAmount: cuotaAmount ? Math.round(Number(cuotaAmount)) : null,
+      installmentCoef: installmentCoef ? Number(installmentCoef) : null,
+      installments: Number(installments) || 1,
       orderId: internalOrderId || siteTransactionId,
       status,
       statusDetail,

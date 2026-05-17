@@ -76,6 +76,23 @@ function statusBadgeOwner(status, statusDetail) {
   return `<span style="display:inline-block;background:#fee2e2;color:#dc2626;padding:8px 20px;border-radius:20px;font-size:12px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;">✗ &nbsp;Pago rechazado — ${statusDetailLabel(statusDetail)}</span>`;
 }
 
+function installmentRows(installments, cuotaAmount, baseTotal, total) {
+  if (!cuotaAmount || !installments || installments <= 1) return '';
+  return `
+    <tr>
+      <td style="padding:6px 0;font-size:12px;color:#888;width:130px;">Cuotas</td>
+      <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${installments}x ${formatPrice(cuotaAmount)}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 0;font-size:12px;color:#888;">Precio base</td>
+      <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${formatPrice(baseTotal)}</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 0;font-size:12px;color:#888;">Intereses</td>
+      <td style="padding:6px 0;font-size:13px;color:#b45309;font-weight:500;">+${formatPrice(total - baseTotal)}</td>
+    </tr>`;
+}
+
 function itemsRows(cartItems, siteUrl) {
   return cartItems.map(item => {
     const imgSrc = siteUrl ? `${siteUrl}${item.image}` : '';
@@ -132,7 +149,7 @@ function addressBlock(addr) {
 
 // ── Email dueño — universal (todos los estados) ───────────────────────────────
 
-function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }) {
+function ownerEmailHTML({ buyer, addr, cartItems, total, baseTotal, cuotaAmount, installments, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }) {
   const isApproved = status === 'approved';
   const subjectLabel = isApproved ? 'Nueva venta recibida' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra — pago rechazado';
   return `<!DOCTYPE html>
@@ -177,6 +194,7 @@ function ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, status
               <td style="padding:6px 0;font-size:12px;color:#888;">Estado</td>
               <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${status}${statusDetail ? ` — ${statusDetailLabel(statusDetail)}` : ''}</td>
             </tr>
+            ${installmentRows(installments, cuotaAmount, baseTotal, total)}
           </table>
         </td>
       </tr>
@@ -387,7 +405,7 @@ function buyerApprovedEmailHTML({ buyer, addr, cartItems, total, orderId, siteUr
 
 // ── Email comprador — confirmación de orden ───────────────────────────────────
 
-function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, siteUrl }) {
+function buyerEmailHTML({ buyer, addr, cartItems, total, baseTotal, cuotaAmount, installments, orderId, status, statusDetail, paymentMethod, siteUrl }) {
   const subjectLabel = status === 'approved'
     ? 'Tu pedido fue confirmado'
     : status === 'pending' || status === 'in_process'
@@ -431,6 +449,7 @@ function buyerEmailHTML({ buyer, addr, cartItems, total, orderId, status, status
               <td style="padding:6px 0;font-size:12px;color:#888;">Estado</td>
               <td style="padding:6px 0;font-size:13px;color:#111;font-weight:500;">${status}${statusDetail ? ` — ${statusDetailLabel(statusDetail)}` : ''}</td>
             </tr>
+            ${installmentRows(installments, cuotaAmount, baseTotal, total)}
           </table>
         </td>
       </tr>
@@ -716,7 +735,7 @@ async function sendNewsletterEmail({ email }) {
   if (error) throw new Error(error.message);
 }
 
-async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId }) {
+async function sendOrderEmails({ buyer, addr, cartItems, total, baseTotal, cuotaAmount, installmentCoef, installments, orderId, status, statusDetail, paymentMethod, paymentId }) {
   const siteUrl = process.env.SITE_URL || '';
 
   const subjectEmojis = { approved: '🛍️', pending: '⏳', rejected: '⚠️' };
@@ -731,7 +750,7 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
       from: 'Azter Ventas <noreply@azterstudio.com>',
       to: notifyTo,
       subject: `${emoji} ${status === 'approved' ? 'Nueva venta' : status === 'pending' ? 'Pago pendiente' : 'Intento de compra'} — ${buyer.nombre} ${buyer.apellido} — ${formatPrice(total)}`,
-      html: ownerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
+      html: ownerEmailHTML({ buyer, addr, cartItems, total, baseTotal, cuotaAmount, installments, orderId, status, statusDetail, paymentMethod, paymentId, siteUrl }),
     });
     if (error) throw new Error(error.message);
     console.log(`📧 Email al dueño enviado [${status}]`);
@@ -747,7 +766,7 @@ async function sendOrderEmails({ buyer, addr, cartItems, total, orderId, status,
         from: 'Azter <noreply@azterstudio.com>',
         to: [buyer.email],
         subject: `🛍️ Tu pedido fue confirmado — Orden #${orderId}`,
-        html: buyerEmailHTML({ buyer, addr, cartItems, total, orderId, status, statusDetail, paymentMethod, siteUrl }),
+        html: buyerEmailHTML({ buyer, addr, cartItems, total, baseTotal, cuotaAmount, installments, orderId, status, statusDetail, paymentMethod, siteUrl }),
       });
       if (error) throw new Error(error.message);
       console.log(`📧 Email al comprador enviado [approved]`);
